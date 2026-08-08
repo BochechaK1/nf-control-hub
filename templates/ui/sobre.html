@@ -1,0 +1,99 @@
+{% extends "ui/base.html" %}
+
+{% block title %}Sobre | NF Control Hub{% endblock %}
+{% block heading %}Sobre{% endblock %}
+{% block eyebrow %}Produto, escopo e garantias do MVP{% endblock %}
+
+{% block content %}
+<section class="panel about-hero">
+    <div>
+        <p class="eyebrow">{{ versao }}</p>
+        <h2>NF Control Hub</h2>
+        <p class="lead">Aplicacao web interna para importar pedidos e NF-e, conferir saldos, aprovar associacoes, acompanhar recebimentos e consultar historico auditavel.</p>
+    </div>
+    <div class="about-owner">
+        <article>
+            <span>Criado por</span>
+            <strong>{{ criador }}</strong>
+        </article>
+        <article>
+            <span>Contato</span>
+            <strong>{{ contato }}</strong>
+        </article>
+    </div>
+</section>
+
+<section class="card-row about-summary">
+    <article class="panel summary-card">
+        <span class="eyebrow">Ambiente</span>
+        <strong>Interno</strong>
+        <small>Rede local que ja alcanca o servidor</small>
+    </article>
+    <article class="panel summary-card">
+        <span class="eyebrow">Fonte fiscal</span>
+        <strong>XML</strong>
+        <small>NF-e modelo 55 como documento oficial</small>
+    </article>
+    <article class="panel summary-card">
+        <span class="eyebrow">Decisao</span>
+        <strong>Manual</strong>
+        <small>Nenhuma associacao e aprovada automaticamente</small>
+    </article>
+    <article class="panel summary-card">
+        <span class="eyebrow">Auditoria</span>
+        <strong>Permanente</strong>
+        <small>Eventos relevantes preservados</small>
+    </article>
+</section>
+
+<section class="about-layout">
+    <article class="panel">
+        <div class="panel-header">
+            <div>
+                <h2>Escopo do MVP</h2>
+                <p class="section-note">O sistema foi desenhado para uma instalacao interna, com banco separado por cliente e operacao web.</p>
+            </div>
+        </div>
+        <div class="about-chip-grid">
+            {% for item in escopo %}
+                <span>{{ item }}</span>
+            {% endfor %}
+        </div>
+    </article>
+
+    <article class="panel">
+        <div class="panel-header">
+            <h2>Modulos cobertos</h2>
+        </div>
+        <ul class="about-checklist">
+            {% for item in modulos %}
+                <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+    </article>
+</section>
+
+<section class="about-layout">
+    <article class="panel">
+        <div class="panel-header">
+            <h2>Garantias preservadas</h2>
+        </div>
+        <ul class="about-checklist about-checklist-strong">
+            {% for item in garantias %}
+                <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+    </article>
+
+    <article class="panel">
+        <div class="panel-header">
+            <h2>Fora do MVP</h2>
+        </div>
+        <ul class="about-checklist about-checklist-muted">
+            {% for item in fora_mvp %}
+                <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+    </article>
+</section>
+{% endblock %}

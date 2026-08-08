@@ -1,0 +1,181 @@
+{% extends "ui/base.html" %}
+
+{% block title %}Relatorios | NF Control Hub{% endblock %}
+{% block heading %}Relatorios{% endblock %}
+{% block eyebrow %}Historico, itens faturados e exportacoes autorizadas{% endblock %}
+
+{% block content %}
+<section class="card-row reports-summary">
+    {% for card in cards %}
+        <article class="panel summary-card">
+            <span class="eyebrow">{{ card.titulo }}</span>
+            <strong>{{ card.valor }}</strong>
+            <small>{{ card.detalhe }}</small>
+        </article>
+    {% endfor %}
+</section>
+
+<section class="reports-layout">
+    <article class="panel">
+        <div class="panel-header">
+            <div>
+                <h2>Itens faturados</h2>
+                <p class="section-note">Alocacoes aprovadas e vigentes, derivadas da associacao entre NF e pedido.</p>
+            </div>
+            <span class="status status-success">{{ alocacoes|length }} linha(s)</span>
+        </div>
+
+        {% if alocacoes %}
+            <div class="table-wrap">
+                <table class="report-items-table">
+                    <thead>
+                        <tr>
+                            <th>NF</th>
+                            <th>Pedido</th>
+                            <th>Produto</th>
+                            <th>Quantidade</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for alocacao in alocacoes %}
+                            <tr>
+                                <td>
+                                    <strong>{{ alocacao.associacao.nota_fiscal }}</strong>
+                                    <span class="row-note">{{ alocacao.associacao.nota_fiscal.fornecedor }}</span>
+                                </td>
+                                <td>
+                                    <strong>{{ alocacao.associacao.pedido }}</strong>
+                                    <span class="row-note">{{ alocacao.item_pedido.pedido.loja.nome }}</span>
+                                </td>
+                                <td>
+                                    <strong>{{ alocacao.item_nota_fiscal.codigo_original }}</strong>
+                                    <span class="row-note">{{ alocacao.item_nota_fiscal.descricao_original }}</span>
+                                </td>
+                                <td>
+                                    <strong>{{ alocacao.quantidade }}</strong>
+                                    <span class="row-note">{{ alocacao.item_nota_fiscal.unidade_original }}</span>
+                                </td>
+                                <td>
+                                    <span class="status status-receb-vigente">{{ alocacao.get_status_display }}</span>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <strong>Nenhum item faturado.</strong>
+                <span>Depois da aprovacao na Fila, as alocacoes vigentes aparecem neste relatorio.</span>
+            </div>
+        {% endif %}
+    </article>
+
+    <aside class="report-side">
+        <section class="panel report-snapshot">
+            <div class="panel-header">
+                <h2>Resumo operacional</h2>
+            </div>
+            <div class="snapshot-list">
+                <div>
+                    <span>NFs recentes</span>
+                    <strong>{{ notas|length }}</strong>
+                    <small>Ultimas notas dentro do seu escopo</small>
+                </div>
+                <div>
+                    <span>Recebidos</span>
+                    <strong>{{ recebidos_total }}</strong>
+                    <small>Confirmacoes vigentes</small>
+                </div>
+                <div>
+                    <span>Exportacoes</span>
+                    <strong>{{ exportacoes_total }}</strong>
+                    <small>Arquivos autorizados</small>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <div class="panel-header">
+                <h2>Exportacoes</h2>
+            </div>
+            {% if exportacoes %}
+                <div class="export-list">
+                    {% for exportacao in exportacoes %}
+                        <article class="export-card">
+                            <div>
+                                <span class="eyebrow">{{ exportacao.get_tipo_display }}</span>
+                                <strong>{{ exportacao.arquivo.nome_original }}</strong>
+                                <small>{{ exportacao.gerada_em|date:"d/m/Y H:i" }}</small>
+                            </div>
+                            <a class="text-link" href="{% url 'ui:download_arquivo' exportacao.arquivo.id %}">Baixar</a>
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    <strong>Nenhuma exportacao gerada.</strong>
+                    <span>A copia preenchida nasce apos uma associacao aprovada.</span>
+                </div>
+            {% endif %}
+        </section>
+    </aside>
+</section>
+
+<section class="panel">
+    <div class="panel-header">
+        <div>
+            <h2>Historico recente</h2>
+            <p class="section-note">Eventos de importacao, decisao, recebimento e exportacao relevantes.</p>
+        </div>
+    </div>
+
+    {% if linhas %}
+        <div class="table-wrap">
+            <table class="audit-table">
+                <thead>
+                    <tr>
+                        <th>Data</th>
+                        <th>Acao</th>
+                        <th>Registro</th>
+                        <th>Usuario</th>
+                        <th>Origem</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for linha in linhas %}
+                        <tr>
+                            <td>
+                                <strong>{{ linha.criado_em|date:"d/m/Y H:i" }}</strong>
+                            </td>
+                            <td>
+                                <span class="status">{{ linha.acao }}</span>
+                                {% if linha.motivo %}
+                                    <span class="row-note">{{ linha.motivo }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <strong>{{ linha.entidade_tipo }}</strong>
+                                <span class="row-note">#{{ linha.entidade_id }}</span>
+                            </td>
+                            <td>{{ linha.usuario|default:"Sistema" }}</td>
+                            <td>{{ linha.get_origem_display }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="empty-state">
+            {% if can_view_audit %}
+                <strong>Nenhum evento registrado.</strong>
+                <span>Importacoes, decisoes e exportacoes aparecem aqui.</span>
+            {% else %}
+                <strong>Historico restrito.</strong>
+                <span>Eventos de auditoria ficam ocultos quando nao ha escopo de loja comprovado.</span>
+            {% endif %}
+        </div>
+    {% endif %}
+</section>
+{% endblock %}

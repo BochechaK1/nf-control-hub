@@ -1,0 +1,201 @@
+{% extends "ui/base.html" %}
+
+{% block title %}Recebimento | NF Control Hub{% endblock %}
+{% block heading %}Recebimento{% endblock %}
+{% block eyebrow %}Confirmacao fisica de NFs aprovadas{% endblock %}
+
+{% block content %}
+<section class="card-row receiving-summary">
+    <article class="panel summary-card">
+        <span class="eyebrow">Pendentes</span>
+        <strong>{{ recebimento_resumo.pendentes }}</strong>
+        <small>NFs aprovadas aguardando chegada fisica</small>
+    </article>
+    <article class="panel summary-card">
+        <span class="eyebrow">Alerta 30 dias</span>
+        <strong>{{ recebimento_resumo.alertas_30 }}</strong>
+        <small>Aviso informativo desde emissao/faturamento</small>
+    </article>
+    <article class="panel summary-card">
+        <span class="eyebrow">Com divergencia</span>
+        <strong>{{ recebimento_resumo.recebidos_com_divergencia }}</strong>
+        <small>Recebimentos vigentes com ocorrencia registrada</small>
+    </article>
+    <article class="panel summary-card">
+        <span class="eyebrow">Recebidos</span>
+        <strong>{{ recebimento_resumo.recebidos_vigentes }}</strong>
+        <small>Historico vigente de confirmacoes</small>
+    </article>
+</section>
+
+<section class="panel">
+    <div class="panel-header">
+        <div>
+            <h2>Confirmacoes pendentes</h2>
+            <p class="section-note">Confirme a NF inteira com a data real da chegada fisica.</p>
+        </div>
+        <span class="status">{{ pendentes|length }} NF(s)</span>
+    </div>
+
+    {% if pendentes %}
+        <div class="receiving-list">
+            {% for nota in pendentes %}
+                <article class="receiving-card {% if nota.alerta_recebimento %}is-alert{% endif %}">
+                    <div class="receiving-card-main">
+                        <div class="receiving-card-head">
+                            <div>
+                                <span class="eyebrow">Nota fiscal</span>
+                                <h3>NF {{ nota.numero }}/{{ nota.serie }}</h3>
+                            </div>
+                            <span class="status status-{{ nota.recebimento_tom }}">{{ nota.dias_aguardando }} dia(s)</span>
+                        </div>
+
+                        <div class="receiving-meta">
+                            <div>
+                                <span>Fornecedor</span>
+                                <strong>{{ nota.fornecedor }}</strong>
+                            </div>
+                            <div>
+                                <span>Loja</span>
+                                <strong>{{ nota.loja.nome|default:"Loja em revisao" }}</strong>
+                            </div>
+                            <div>
+                                <span>Emissao</span>
+                                <strong>{{ nota.data_emissao|date:"d/m/Y" }}</strong>
+                            </div>
+                            <div>
+                                <span>Pedido associado</span>
+                                <strong>{{ nota.associacao_vigente.pedido|default:"-" }}</strong>
+                            </div>
+                        </div>
+
+                        {% if nota.alerta_recebimento %}
+                            <div class="alert-strip">
+                                NF aguardando recebimento ha 30 dias ou mais. O alerta e informativo e nao bloqueia a confirmacao.
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="receiving-card-action">
+                        {% if can_decide %}
+                            <form class="receive-form" method="post">
+                                {% csrf_token %}
+                                <input type="hidden" name="nota_fiscal_id" value="{{ nota.id }}">
+                                <label>
+                                    <span>Data real</span>
+                                    <input type="date" name="data_recebimento" value="{{ hoje|date:'Y-m-d' }}" required>
+                                </label>
+                                <button class="primary-button" type="submit" name="action" value="confirm">Sem divergencia</button>
+                                <details>
+                                    <summary>Registrar divergencia</summary>
+                                    <label>
+                                        <span>Tipo</span>
+                                        <select name="ocorrencia_tipo">
+                                            {% for value, label in ocorrencia_tipos %}
+                                                <option value="{{ value }}">{{ label }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </label>
+                                    <label>
+                                        <span>Descricao</span>
+                                        <textarea name="ocorrencia_descricao" rows="3" placeholder="Descreva a ocorrencia da NF inteira"></textarea>
+                                    </label>
+                                    <button class="danger-button" type="submit" name="action" value="confirm_divergence">Confirmar com divergencia</button>
+                                </details>
+                            </form>
+                        {% else %}
+                            <div class="readonly-box">
+                                <span class="status">Somente consulta</span>
+                                <small>Apenas Administrador ou Mestre confirma recebimento.</small>
+                            </div>
+                        {% endif %}
+                    </div>
+                </article>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="empty-state">
+            <strong>Nenhuma NF aprovada aguardando recebimento.</strong>
+            <span>Assim que uma associacao for aprovada na Fila, ela aparece aqui.</span>
+        </div>
+    {% endif %}
+</section>
+
+<section class="panel">
+    <div class="panel-header">
+        <div>
+            <h2>Historico de recebimento</h2>
+            <p class="section-note">Confirmacoes, divergencias e anulacoes permanecem disponiveis para auditoria.</p>
+        </div>
+    </div>
+
+    {% if historico %}
+        <div class="table-wrap">
+            <table class="receiving-history-table">
+                <thead>
+                    <tr>
+                        <th>Recebimento</th>
+                        <th>NF</th>
+                        <th>Fornecedor</th>
+                        <th>Resultado</th>
+                        <th>Operador</th>
+                        <th>Anulacao</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rec in historico %}
+                        <tr>
+                            <td>
+                                <strong>{{ rec.data_recebimento|date:"d/m/Y" }}</strong>
+                                <span class="row-note">Registrado em {{ rec.confirmado_em|date:"d/m/Y H:i" }}</span>
+                            </td>
+                            <td>
+                                <strong>NF {{ rec.nota_fiscal.numero }}/{{ rec.nota_fiscal.serie }}</strong>
+                                <span class="row-note">{{ rec.nota_fiscal.loja.nome|default:"Loja em revisao" }}</span>
+                            </td>
+                            <td>{{ rec.nota_fiscal.fornecedor }}</td>
+                            <td>
+                                <span class="status {% if rec.resultado == 'COM_DIVERGENCIA' %}status-warning{% else %}status-success{% endif %}">
+                                    {{ rec.get_resultado_display }}
+                                </span>
+                                {% if rec.ocorrencias.all %}
+                                    <div class="occurrence-list">
+                                        {% for ocorrencia in rec.ocorrencias.all %}
+                                            <span>{{ ocorrencia.get_tipo_display }}</span>
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <strong>{{ rec.confirmado_por }}</strong>
+                                <span class="status status-receb-{{ rec.status|lower }}">{{ rec.get_status_display }}</span>
+                            </td>
+                            <td>
+                                {% if can_decide and rec.status == "VIGENTE" %}
+                                    <form class="inline-form" method="post">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="action" value="annul_receiving">
+                                        <input type="hidden" name="recebimento_id" value="{{ rec.id }}">
+                                        <label>
+                                            <span>Justificativa</span>
+                                            <input type="text" name="justificativa" placeholder="Motivo da anulacao" required>
+                                        </label>
+                                        <button class="ghost-button" type="submit">Anular</button>
+                                    </form>
+                                {% else %}
+                                    <span class="status">Historico</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="empty-state">
+            <strong>Nenhum recebimento confirmado.</strong>
+            <span>Confirmacoes e divergencias permanecem aqui para consulta.</span>
+        </div>
+    {% endif %}
+</section>
+{% endblock %}

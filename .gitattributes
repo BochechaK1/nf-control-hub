@@ -1,0 +1,12 @@
+* text=auto
+
+*.py text eol=lf
+*.md text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.html text eol=lf
+*.csv text eol=lf
+
+*.xlsx binary
+*.sqlite3 binary
+*.xml text eol=lf

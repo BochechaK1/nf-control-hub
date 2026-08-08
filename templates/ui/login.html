@@ -1,0 +1,55 @@
+{% load static %}
+<!doctype html>
+<html lang="pt-br">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Entrar | NF Control Hub</title>
+    <link rel="stylesheet" href="{% static 'ui/app.css' %}">
+</head>
+<body class="login-body">
+    <main class="login-shell">
+        <section class="login-hero" aria-label="NF Control Hub">
+            <div class="brand login-brand">
+                <span class="brand-mark">NF</span>
+                <span>
+                    <strong>NF Control Hub</strong>
+                    <small>Rede interna</small>
+                </span>
+            </div>
+            <div>
+                <p class="eyebrow">Controle fiscal operacional</p>
+                <h1>Pedidos, NF-e, saldos e recebimento em uma fila auditavel.</h1>
+            </div>
+            <div class="login-metrics">
+                <span>XML permanente</span>
+                <span>Aprovacao administrativa</span>
+                <span>Historico rastreavel</span>
+            </div>
+        </section>
+
+        <section class="login-panel">
+            <div>
+                <p class="eyebrow">Acesso</p>
+                <h2>Entrar no sistema</h2>
+            </div>
+            {% if form.errors %}
+                <div class="message message-error">Usuario ou senha invalidos.</div>
+            {% endif %}
+            <form method="post" class="login-form">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ next }}">
+                <label>
+                    <span>Usuario</span>
+                    <input type="text" name="{{ form.username.html_name }}" autocomplete="username" required autofocus>
+                </label>
+                <label>
+                    <span>Senha</span>
+                    <input type="password" name="{{ form.password.html_name }}" autocomplete="current-password" required>
+                </label>
+                <button class="primary-button" type="submit">Entrar</button>
+            </form>
+        </section>
+    </main>
+</body>
+</html>

@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe12345678901234567890123456789012345678901234" versao="4.00">
+      <ide>
+        <cUF>35</cUF>
+        <natOp>Venda</natOp>
+        <mod>55</mod>
+        <serie>1</serie>
+        <nNF>1987853</nNF>
+        <dhEmi>2026-08-06T10:30:00-03:00</dhEmi>
+      </ide>
+      <emit>
+        <CNPJ>22222222000122</CNPJ>
+        <xNome>Coral</xNome>
+      </emit>
+      <dest>
+        <CNPJ>11111111000111</CNPJ>
+        <xNome>Matriz</xNome>
+      </dest>
+      <det nItem="1">
+        <prod>
+          <cProd>000123</cProd>
+          <cEAN>SEM GTIN</cEAN>
+          <xProd>Tinta branco 18 L</xProd>
+          <NCM>32091010</NCM>
+          <CFOP>5102</CFOP>
+          <uCom>BD</uCom>
+          <qCom>10.0000</qCom>
+          <vUnCom>99.900000</vUnCom>
+          <vProd>999.00</vProd>
+          <xPed>W000062885</xPed>
+          <nItemPed>1</nItemPed>
+        </prod>
+      </det>
+      <det nItem="2">
+        <prod>
+          <cProd>000456</cProd>
+          <cEAN>SEM GTIN</cEAN>
+          <xProd>Massa corrida 25 kg</xProd>
+          <NCM>32141010</NCM>
+          <CFOP>5102</CFOP>
+          <uCom>CX</uCom>
+          <qCom>2.0000</qCom>
+          <vUnCom>50.000000</vUnCom>
+          <vProd>100.00</vProd>
+          <xPed>W000062885</xPed>
+          <nItemPed>2</nItemPed>
+        </prod>
+      </det>
+      <total>
+        <ICMSTot>
+          <vNF>1099.00</vNF>
+        </ICMSTot>
+      </total>
+    </infNFe>
+  </NFe>
+  <protNFe versao="4.00">
+    <infProt>
+      <chNFe>12345678901234567890123456789012345678901234</chNFe>
+      <cStat>100</cStat>
+      <xMotivo>Autorizado o uso da NF-e</xMotivo>
+    </infProt>
+  </protNFe>
+</nfeProc>

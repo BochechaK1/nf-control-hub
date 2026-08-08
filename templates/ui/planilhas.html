@@ -1,0 +1,133 @@
+{% extends "ui/base.html" %}
+
+{% block title %}Planilhas | NF Control Hub{% endblock %}
+{% block heading %}Planilhas{% endblock %}
+{% block eyebrow %}Pedidos importados e saldos{% endblock %}
+
+{% block content %}
+{% if can_import %}
+<section class="panel upload-panel" id="upload-planilhas">
+    <div class="panel-header">
+        <div>
+            <h2>Importar planilhas de pedido</h2>
+            <small>Solte os Excels; loja e fornecedor serao identificados pelo cadastro sempre que possivel.</small>
+        </div>
+    </div>
+    <form class="upload-form form-surface" method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <label>
+            <span>Loja opcional</span>
+            <select name="loja">
+                <option value="">Identificar automaticamente</option>
+                {% for loja in lojas %}
+                    <option value="{{ loja.id }}">{{ loja.nome }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>
+            <span>Fornecedor opcional</span>
+            <select name="fornecedor">
+                <option value="">Identificar automaticamente</option>
+                {% for fornecedor in fornecedores %}
+                    <option value="{{ fornecedor.id }}">{{ fornecedor.nome }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="file-field file-picker">
+            <span>Arquivos Excel</span>
+            <input type="file" name="planilhas" accept=".xlsx,.xlsm" multiple required>
+            <strong>
+                Selecionar arquivos
+                <small class="file-picker-text">Nenhum arquivo selecionado</small>
+            </strong>
+        </label>
+        <button class="primary-button" type="submit">Importar</button>
+    </form>
+</section>
+{% endif %}
+
+<section class="card-row planilha-summary">
+    <article class="summary-card">
+        <span>Pedidos ativos</span>
+        <strong>{{ resumo.pedidos_total }}</strong>
+        <small>Planilhas aceitas e ainda mantidas na operacao.</small>
+    </article>
+    <article class="summary-card">
+        <span>Itens importados</span>
+        <strong>{{ resumo.itens_total }}</strong>
+        <small>Linhas validas extraidas das planilhas.</small>
+    </article>
+    <article class="summary-card">
+        <span>Saldo aberto</span>
+        <strong>{{ resumo.saldo_total|floatformat:0 }}</strong>
+        <small>Quantidade ainda disponivel para conferencia.</small>
+    </article>
+    <article class="summary-card">
+        <span>Faturado</span>
+        <strong>{{ resumo.faturado_total|floatformat:0 }}</strong>
+        <small>Quantidade associada a NF e aguardando recebimento.</small>
+    </article>
+</section>
+
+<section class="panel">
+    <div class="panel-header">
+        <div>
+            <h2>Pedidos importados</h2>
+            <small>Banco operacional de pedidos, saldos e arquivos preservados.</small>
+        </div>
+    </div>
+    {% if planilhas %}
+    <div class="table-wrap">
+        <table class="orders-table">
+            <thead>
+                <tr>
+                    <th>Pedido</th>
+                    <th>Fornecedor / loja</th>
+                    <th>Data</th>
+                    <th>Quantidades</th>
+                    <th>Arquivo</th>
+                    <th>Estado</th>
+                    <th>Acoes</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in planilhas %}
+                    <tr>
+                        <td>
+                            <strong>{{ item.numero_pedido|default:item.id }}</strong>
+                            <small class="row-note">{{ item.total_itens }} item(ns)</small>
+                        </td>
+                        <td>
+                            {{ item.fornecedor }}
+                            <small class="row-note">{{ item.loja.nome }}</small>
+                        </td>
+                        <td>{{ item.data_operacional|date:"d/m/Y" }}</td>
+                        <td>
+                            <div class="quantity-stack">
+                                <span>Saldo <strong>{{ item.saldo_total|floatformat:0 }}</strong></span>
+                                <span>Faturado <strong>{{ item.faturado_total|floatformat:0 }}</strong></span>
+                                <span>Recebido <strong>{{ item.recebido_total|floatformat:0 }}</strong></span>
+                            </div>
+                        </td>
+                        <td>
+                            {{ item.arquivo.nome_original }}
+                            <small class="row-note">Total {{ item.quantidade_total|floatformat:3 }}</small>
+                        </td>
+                        <td><span class="status status-order-{{ item.estado|lower }}">{{ item.get_estado_display }}</span></td>
+                        <td><a class="text-link" href="{% url 'ui:download_arquivo' item.arquivo.id %}">Baixar</a></td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+        <div class="empty-state">
+            <strong>Nenhuma planilha importada ainda.</strong>
+            <span>Cadastre empresa, loja e fornecedor no Admin; depois importe os arquivos Excel de pedido por aqui.</span>
+            {% if can_import %}
+                <a class="primary-button" href="#upload-planilhas">Importar primeira planilha</a>
+            {% endif %}
+        </div>
+    {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,83 @@
+{% load static %}
+<!doctype html>
+<html lang="pt-br">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}NF Control Hub{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'ui/app.css' %}">
+    <script src="{% static 'ui/app.js' %}" defer></script>
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="sidebar" aria-label="Menu principal">
+            <div class="sidebar-top">
+                <a class="brand" href="{% url 'ui:dashboard' %}" aria-label="NF Control Hub">
+                    <span class="brand-mark">NF</span>
+                    <span>
+                        <strong>NF Control Hub</strong>
+                        <small>{{ empresa_nome }}</small>
+                    </span>
+                </a>
+                <span class="environment-pill">Rede interna</span>
+            </div>
+
+            <nav class="nav-list" aria-label="Modulos do sistema">
+                <span class="nav-kicker">Modulos</span>
+                {% for key, label, url_name in menu %}
+                    <a class="nav-item {% if active == key %}is-active{% endif %}" href="{% url url_name %}" {% if active == key %}aria-current="page"{% endif %}>
+                        <span class="nav-icon nav-icon-{{ key }}" aria-hidden="true"></span>
+                        <span class="nav-copy">
+                            <strong>{{ label }}</strong>
+                            {% if key == "dashboard" %}<small>Indicadores e fila</small>{% endif %}
+                            {% if key == "fila" %}<small>Conferencia de NFs</small>{% endif %}
+                            {% if key == "recebimento" %}<small>Chegada fisica</small>{% endif %}
+                            {% if key == "planilhas" %}<small>Pedidos Excel</small>{% endif %}
+                            {% if key == "relatorios" %}<small>Historico e saidas</small>{% endif %}
+                            {% if key == "diagnostico" %}<small>Falhas e revisao</small>{% endif %}
+                            {% if key == "configuracoes" %}<small>Cadastros base</small>{% endif %}
+                            {% if key == "sobre" %}<small>Escopo do MVP</small>{% endif %}
+                        </span>
+                    </a>
+                {% endfor %}
+            </nav>
+
+            <div class="sidebar-footer">
+                <span>Perfil atual</span>
+                <strong>{{ request.user.get_role_display|default:"Mestre" }}</strong>
+                <small>{{ request.user.username }}</small>
+            </div>
+        </aside>
+
+        <main class="main-area" id="conteudo">
+            <header class="topbar">
+                <div class="topbar-heading">
+                    <p class="eyebrow">{% block eyebrow %}Operacao interna{% endblock %}</p>
+                    <h1>{% block heading %}Dashboard{% endblock %}</h1>
+                </div>
+                <div class="topbar-actions" aria-label="Acoes da pagina">
+                    <span class="scope">{{ loja_nome }}</span>
+                    <span class="user-pill">{{ request.user.username }}</span>
+                    {% if can_admin %}
+                        <a class="ghost-button" href="{% url 'admin:index' %}">Admin</a>
+                    {% endif %}
+                    <form class="logout-form" method="post" action="{% url 'ui:logout' %}">
+                        {% csrf_token %}
+                        <button class="ghost-button" type="submit">Sair</button>
+                    </form>
+                </div>
+            </header>
+
+            {% if messages %}
+                <div class="message-stack">
+                    {% for message in messages %}
+                        <div class="message message-{{ message.tags }}">{{ message }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+</body>
+</html>

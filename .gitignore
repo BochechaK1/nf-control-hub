@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local settings and secrets
+.env
+.env.*
+!.env.example
+
+# Django/local runtime
+*.sqlite3
+*.log
+staticfiles/
+media/
+tmp/
+
+# NF Control Hub operational files
+storage/
+storage_manifest.json
+backup_manifest*.json
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+
+# Codex/local assistant state
+.codex/
+.agents/

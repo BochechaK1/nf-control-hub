@@ -1,0 +1,97 @@
+{% extends "ui/base.html" %}
+
+{% block title %}Dashboard | NF Control Hub{% endblock %}
+{% block heading %}Dashboard{% endblock %}
+{% block eyebrow %}Fila, saldos e recebimento{% endblock %}
+
+{% block content %}
+<section class="metric-grid">
+    {% for metric in metrics %}
+        <a class="metric-card metric-{{ metric.tone }}" href="{% url metric.url %}">
+            <span>{{ metric.label }}</span>
+            <strong>{{ metric.value }}</strong>
+            <small>{{ metric.detail }}</small>
+        </a>
+    {% endfor %}
+</section>
+
+<section class="dashboard-main">
+    <div class="panel panel-large">
+        <div class="panel-header">
+            <div>
+                <h2>Fila prioritaria</h2>
+                <small>NFs aguardando aprovacao, ordenadas pela chegada ao sistema.</small>
+            </div>
+            <a class="text-link" href="{% url 'ui:fila' %}">Abrir fila</a>
+        </div>
+        {% if fila_prioritaria %}
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>NF</th>
+                            <th>Fornecedor</th>
+                            <th>Loja</th>
+                            <th>Pedido</th>
+                            <th>Compat.</th>
+                            <th>Nivel</th>
+                            <th>Alerta</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in fila_prioritaria %}
+                            <tr>
+                                <td><strong>NF {{ item.numero }}</strong></td>
+                                <td>{{ item.fornecedor }}</td>
+                                <td>{{ item.loja }}</td>
+                                <td>{{ item.pedido }}</td>
+                                <td><strong>{{ item.compatibilidade }}</strong></td>
+                                <td><span class="status status-{{ item.tom }}">{{ item.nivel }}</span></td>
+                                <td>{{ item.alerta }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state dashboard-empty">
+                <strong>Nenhuma NF aguardando decisao.</strong>
+                <span>Quando um XML for importado e conferido, ele aparece aqui com a melhor candidata.</span>
+                <a class="primary-button" href="{% url 'ui:fila' %}">Ir para Fila</a>
+            </div>
+        {% endif %}
+    </div>
+</section>
+
+<section class="panel dashboard-activity-panel">
+    <details class="activity-disclosure">
+        <summary>
+            <span>
+                <strong>Atividade recente</strong>
+                {% if atividade_resumo.ultima %}
+                    <small>{{ atividade_resumo.total }} evento(s) - ultimo: {{ atividade_resumo.ultima.acao }} em {{ atividade_resumo.ultima.criado_em|date:"d/m/Y H:i" }}</small>
+                {% else %}
+                    <small>Nenhuma atividade registrada ainda.</small>
+                {% endif %}
+            </span>
+            <span class="status">Ver historico</span>
+        </summary>
+        {% if atividade %}
+            <ol class="timeline dashboard-timeline dashboard-timeline-compact">
+                {% for evento in atividade %}
+                    <li>
+                        <strong>{{ evento.acao }}</strong>
+                        <span>{{ evento.entidade_tipo }} #{{ evento.entidade_id }}</span>
+                        <small>{{ evento.criado_em|date:"d/m/Y H:i" }} - {{ evento.usuario|default:"Sistema" }}</small>
+                    </li>
+                {% endfor %}
+            </ol>
+        {% else %}
+            <div class="empty-state dashboard-activity-empty">
+                <strong>Nenhuma atividade registrada.</strong>
+                <span>Importacoes, decisoes, recebimentos e exportacoes aparecem aqui.</span>
+            </div>
+        {% endif %}
+    </details>
+</section>
+{% endblock %}

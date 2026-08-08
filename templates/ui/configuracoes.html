@@ -1,0 +1,192 @@
+{% extends "ui/base.html" %}
+
+{% block title %}Configuracoes | NF Control Hub{% endblock %}
+{% block heading %}Configuracoes{% endblock %}
+{% block eyebrow %}Empresas, lojas, fornecedores e usuarios{% endblock %}
+
+{% block content %}
+<section class="card-row settings-summary">
+    <article class="panel summary-card">
+        <span class="eyebrow">Empresas</span>
+        <strong>{{ configuracoes_resumo.empresas }}</strong>
+        <small>Instalacoes cliente dentro do seu escopo</small>
+    </article>
+    <article class="panel summary-card">
+        <span class="eyebrow">Lojas ativas</span>
+        <strong>{{ configuracoes_resumo.lojas_ativas }}</strong>
+        <small>Destinatarios autorizados para operacao</small>
+    </article>
+    <article class="panel summary-card">
+        <span class="eyebrow">Fornecedores</span>
+        <strong>{{ configuracoes_resumo.fornecedores_ativos }}</strong>
+        <small>Emitentes ativos para pedidos e NFs</small>
+    </article>
+    <article class="panel summary-card">
+        <span class="eyebrow">Usuarios ativos</span>
+        <strong>{{ configuracoes_resumo.usuarios_ativos }}</strong>
+        <small>Perfis com acesso habilitado</small>
+    </article>
+</section>
+
+<section class="settings-layout">
+    <article class="panel">
+        <div class="panel-header">
+            <div>
+                <h2>Empresas cliente</h2>
+                <p class="section-note">Todas as entidades pertencem a uma empresa para preservar escopo e auditoria.</p>
+            </div>
+        </div>
+
+        {% if empresas %}
+            <div class="settings-list">
+                {% for empresa in empresas %}
+                    <article class="settings-card">
+                        <div class="settings-card-head">
+                            <div>
+                                <span class="eyebrow">Empresa</span>
+                                <h3>{{ empresa.nome }}</h3>
+                            </div>
+                            <span class="status {% if empresa.ativa %}status-success{% else %}status-receb-anulado{% endif %}">
+                                {% if empresa.ativa %}Ativa{% else %}Inativa{% endif %}
+                            </span>
+                        </div>
+                        <div class="settings-meta">
+                            <div>
+                                <span>Codigo</span>
+                                <strong>{{ empresa.codigo }}</strong>
+                            </div>
+                            <div>
+                                <span>CNPJ</span>
+                                <strong>{{ empresa.cnpj|default:"Nao informado" }}</strong>
+                            </div>
+                            <div>
+                                <span>Lojas</span>
+                                <strong>{{ empresa.total_lojas }}</strong>
+                            </div>
+                            <div>
+                                <span>Fornecedores</span>
+                                <strong>{{ empresa.total_fornecedores }}</strong>
+                            </div>
+                            <div>
+                                <span>Usuarios</span>
+                                <strong>{{ empresa.total_usuarios }}</strong>
+                            </div>
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <strong>Nenhuma empresa configurada.</strong>
+                <span>Empresas precisam existir antes da importacao operacional.</span>
+            </div>
+        {% endif %}
+    </article>
+
+    <aside class="settings-side">
+        <section class="panel governance-panel">
+            <span class="eyebrow">Governanca</span>
+            <strong>Configuracoes sao restritas a Administrador e Mestre.</strong>
+            <small>O perfil Mestre e reservado a superusuarios. Visualizadores consultam apenas lojas vinculadas e nao acessam esta tela.</small>
+        </section>
+
+        <section class="panel governance-panel">
+            <span class="eyebrow">Fonte fiscal</span>
+            <strong>XML da NF-e permanece imutavel.</strong>
+            <small>Correcoes de cadastro nao alteram XML, itens fiscais, auditoria ou historico operacional.</small>
+        </section>
+    </aside>
+</section>
+
+<section class="settings-grid">
+    <article class="panel">
+        <div class="panel-header">
+            <h2>Lojas</h2>
+            <span class="status">{{ lojas|length }} registro(s)</span>
+        </div>
+        {% if lojas %}
+            <div class="compact-list">
+                {% for loja in lojas %}
+                    <article class="compact-card">
+                        <div>
+                            <strong>{{ loja.nome }}</strong>
+                            <span>{{ loja.empresa_cliente.nome }}</span>
+                        </div>
+                        <div>
+                            <small>{{ loja.codigo }}</small>
+                            <span class="status {% if loja.ativa %}status-success{% else %}status-receb-anulado{% endif %}">
+                                {% if loja.ativa %}Ativa{% else %}Inativa{% endif %}
+                            </span>
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <strong>Nenhuma loja configurada.</strong>
+                <span>Lojas definem o escopo de consulta dos visualizadores.</span>
+            </div>
+        {% endif %}
+    </article>
+
+    <article class="panel">
+        <div class="panel-header">
+            <h2>Fornecedores</h2>
+            <span class="status">{{ fornecedores|length }} registro(s)</span>
+        </div>
+        {% if fornecedores %}
+            <div class="compact-list">
+                {% for fornecedor in fornecedores %}
+                    <article class="compact-card">
+                        <div>
+                            <strong>{{ fornecedor.nome }}</strong>
+                            <span>{{ fornecedor.empresa_cliente.nome }}</span>
+                        </div>
+                        <div>
+                            <small>{{ fornecedor.cnpj }}</small>
+                            <span class="status {% if fornecedor.ativo %}status-success{% else %}status-receb-anulado{% endif %}">
+                                {% if fornecedor.ativo %}Ativo{% else %}Inativo{% endif %}
+                            </span>
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <strong>Nenhum fornecedor configurado.</strong>
+                <span>Fornecedores separam produtos e aliases dentro de cada empresa.</span>
+            </div>
+        {% endif %}
+    </article>
+
+    <article class="panel">
+        <div class="panel-header">
+            <h2>Usuarios</h2>
+            <span class="status">{{ usuarios|length }} registro(s)</span>
+        </div>
+        {% if usuarios %}
+            <div class="compact-list">
+                {% for usuario in usuarios %}
+                    <article class="compact-card">
+                        <div>
+                            <strong>{{ usuario.username }}</strong>
+                            <span>{{ usuario.empresa_cliente.nome|default:"Acesso plataforma" }}</span>
+                        </div>
+                        <div>
+                            <small>{{ usuario.get_role_display }}</small>
+                            <span class="status {% if usuario.is_active %}status-success{% else %}status-receb-anulado{% endif %}">
+                                {% if usuario.is_active %}Ativo{% else %}Inativo{% endif %}
+                            </span>
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <strong>Nenhum usuario configurado.</strong>
+                <span>Cadastros de acesso aparecem aqui apos criacao no admin.</span>
+            </div>
+        {% endif %}
+    </article>
+</section>
+{% endblock %}

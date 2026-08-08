@@ -1,0 +1,132 @@
+{% extends "ui/base.html" %}
+
+{% block title %}Diagnostico | NF Control Hub{% endblock %}
+{% block heading %}Diagnostico{% endblock %}
+{% block eyebrow %}Falhas tecnicas e fila persistente de processamento{% endblock %}
+
+{% block content %}
+<section class="card-row diagnostic-summary">
+    <article class="panel summary-card">
+        <span class="eyebrow">Abertos</span>
+        <strong>{{ diagnostico_resumo.abertos }}</strong>
+        <small>Ocorrencias tecnicas aguardando revisao</small>
+    </article>
+    <article class="panel summary-card">
+        <span class="eyebrow">Erros</span>
+        <strong>{{ diagnostico_resumo.erros }}</strong>
+        <small>Falhas que impediram processamento</small>
+    </article>
+    <article class="panel summary-card">
+        <span class="eyebrow">Alertas</span>
+        <strong>{{ diagnostico_resumo.alertas }}</strong>
+        <small>Inconsistencias que precisam de atencao</small>
+    </article>
+    <article class="panel summary-card">
+        <span class="eyebrow">Fila worker</span>
+        <strong>{{ tarefa_resumo.aguardando }}</strong>
+        <small>{{ tarefa_resumo.processando }} em processamento, {{ tarefa_resumo.erro }} com erro</small>
+    </article>
+</section>
+
+<section class="diagnostic-layout">
+    <article class="panel">
+        <div class="panel-header">
+            <div>
+                <h2>Ocorrencias tecnicas</h2>
+                <p class="section-note">Arquivos invalidos, estruturas desconhecidas e falhas tecnicas ficam isolados aqui.</p>
+            </div>
+            <span class="status status-warning">{{ diagnostico_resumo.abertos }} aberto(s)</span>
+        </div>
+
+        {% if diagnosticos %}
+            <div class="diagnostic-list">
+                {% for item in diagnosticos %}
+                    <article class="diagnostic-card">
+                        <div class="diagnostic-card-head">
+                            <div>
+                                <span class="eyebrow">{{ item.get_tipo_display }}</span>
+                                <h3>{{ item.mensagem_usuario }}</h3>
+                            </div>
+                            <div class="diagnostic-badges">
+                                <span class="status status-severity-{{ item.severidade|lower }}">{{ item.get_severidade_display }}</span>
+                                <span class="status status-diag-{{ item.status|lower }}">{{ item.get_status_display }}</span>
+                            </div>
+                        </div>
+
+                        <div class="diagnostic-meta">
+                            <div>
+                                <span>Arquivo</span>
+                                <strong>{{ item.arquivo.nome_original|default:"Sem arquivo vinculado" }}</strong>
+                            </div>
+                            <div>
+                                <span>Criado em</span>
+                                <strong>{{ item.criado_em|date:"d/m/Y H:i" }}</strong>
+                            </div>
+                            <div>
+                                <span>Origem</span>
+                                <strong>{{ item.criado_por|default:"Sistema" }}</strong>
+                            </div>
+                        </div>
+
+                        {% if item.detalhe_tecnico %}
+                            <details class="technical-detail">
+                                <summary>Detalhe tecnico</summary>
+                                <pre>{{ item.detalhe_tecnico }}</pre>
+                            </details>
+                        {% endif %}
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <strong>Nenhum diagnostico registrado.</strong>
+                <span>Erros de arquivo e estruturas nao reconhecidas aparecem aqui sem derrubar a aplicacao.</span>
+            </div>
+        {% endif %}
+    </article>
+
+    <aside class="diagnostic-side">
+        <section class="panel">
+            <div class="panel-header">
+                <h2>Tarefas</h2>
+            </div>
+            {% if tarefas %}
+                <div class="task-list">
+                    {% for tarefa in tarefas %}
+                        <article class="task-card">
+                            <div class="task-card-head">
+                                <div>
+                                    <span class="eyebrow">{{ tarefa.get_tipo_display }}</span>
+                                    <strong>{{ tarefa.arquivo.nome_original }}</strong>
+                                </div>
+                                <span class="status status-task-{{ tarefa.estado|lower }}">{{ tarefa.get_estado_display }}</span>
+                            </div>
+                            <div class="progress-track">
+                                <span style="width: {{ tarefa.progresso }}%;"></span>
+                            </div>
+                            <div class="task-meta">
+                                <span>{{ tarefa.progresso }}%</span>
+                                <span>{{ tarefa.tentativas }}/{{ tarefa.max_tentativas }} tentativa(s)</span>
+                            </div>
+                            {% if tarefa.mensagem_usuario %}
+                                <p>{{ tarefa.mensagem_usuario }}</p>
+                            {% endif %}
+                        </article>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    <strong>Nenhuma tarefa na fila.</strong>
+                    <span>Importacoes pendentes, em processamento ou com erro aparecem aqui.</span>
+                </div>
+            {% endif %}
+        </section>
+
+        <section class="panel diagnostic-note">
+            <span class="eyebrow">Separacao correta</span>
+            <strong>Fila e Diagnostico nao sao a mesma coisa.</strong>
+            <small>Loja desconhecida, baixa compatibilidade e ausencia de planilha ficam na Fila. Arquivo ilegivel, estrutura invalida e erro tecnico ficam aqui.</small>
+        </section>
+    </aside>
+</section>
+{% endblock %}
