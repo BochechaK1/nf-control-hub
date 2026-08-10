@@ -10,11 +10,13 @@ from django.utils import timezone
 from openpyxl import Workbook
 
 from accounts.models import Usuario
+from approvals.models import Associacao
 from files.models import Arquivo
 from invoices.models import ItemNotaFiscal, NotaFiscal
 from matching.models import Conferencia, ConferenciaCandidata, ConferenciaItem
 from orders.models import ItemPedido, ModeloPlanilha, ModeloPlanilhaVersao, Pedido
 from organizations.models import EmpresaCliente, Fornecedor, Loja
+from reports.models import Exportacao
 
 
 class UiPreviewTests(TestCase):
@@ -194,6 +196,177 @@ class UiPreviewTests(TestCase):
                 numero_pedido="",
             ).exists()
         )
+
+    def test_planilhas_do_not_assign_unknown_supplier_to_only_registered_supplier(self):
+        empresa = EmpresaCliente.objects.create(nome="Destiny In", codigo="destiny-unknown-supplier")
+        Loja.objects.create(empresa_cliente=empresa, codigo="paraty", nome="paraty")
+        Fornecedor.objects.create(
+            empresa_cliente=empresa,
+            nome="Akzo Nobel Ltda / Coral",
+            cnpj="60.561.719/0095-03",
+        )
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append([None, "Produto", "Descrição", None, None, None, None, None, None, None, "QUANTID."])
+        sheet.append([None, "613305730R", "CORANTE LIQUIDO PRETO 50ML", None, None, None, None, None, None, None, 36])
+        payload = BytesIO()
+        workbook.save(payload)
+        payload.seek(0)
+        upload = SimpleUploadedFile(
+            "IQUINE PARATY (4).xlsx",
+            payload.read(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        with TemporaryDirectory() as temp_dir, override_settings(NFCH_STORAGE_ROOT=Path(temp_dir)):
+            response = self.client.post(reverse("ui:planilhas"), {"planilhas": upload}, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "fornecedor nao cadastrado ou nao identificado")
+        self.assertFalse(Pedido.objects.filter(empresa_cliente=empresa).exists())
+
+    def test_planilhas_identifies_supplier_by_distinctive_token(self):
+        empresa = EmpresaCliente.objects.create(nome="Destiny In", codigo="destiny-iquine-token")
+        loja = Loja.objects.create(empresa_cliente=empresa, codigo="paraty", nome="paraty")
+        fornecedor = Fornecedor.objects.create(
+            empresa_cliente=empresa,
+            nome="TINTAS IQUINE LTDA",
+            cnpj="09.722.463/0006-46",
+        )
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append([None, "Produto", "Descricao", None, None, None, None, None, None, None, "QUANTID."])
+        sheet.append([None, "613305730R", "CORANTE LIQUIDO PRETO 50ML", None, None, None, None, None, None, None, 36])
+        payload = BytesIO()
+        workbook.save(payload)
+        payload.seek(0)
+        upload = SimpleUploadedFile(
+            "IQUINE PARATY (4).xlsx",
+            payload.read(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        with TemporaryDirectory() as temp_dir, override_settings(NFCH_STORAGE_ROOT=Path(temp_dir)):
+            response = self.client.post(reverse("ui:planilhas"), {"planilhas": upload}, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "pedido importado com sucesso")
+        self.assertTrue(Pedido.objects.filter(empresa_cliente=empresa, loja=loja, fornecedor=fornecedor).exists())
+
+    def test_xml_import_recovers_stored_iquine_spreadsheet_and_recalculates_match(self):
+        empresa = EmpresaCliente.objects.create(nome="Destiny In", codigo="destiny-iquine-recover")
+        loja = Loja.objects.create(
+            empresa_cliente=empresa,
+            codigo="paraty",
+            nome="paraty",
+            cnpj="09.580.958/0002-54",
+        )
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append([None, "Produto", "Descricao", None, None, None, None, None, None, None, "QUANTID."])
+        sheet.append([None, "613305730R", "CORANTE LIQUIDO PRETO 50ML", None, None, None, None, None, None, None, 36])
+        payload = BytesIO()
+        workbook.save(payload)
+        stored_bytes = payload.getvalue()
+        xml = b"""<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe33260809722463000646550010000434401938843899" versao="4.00">
+      <ide><natOp>Venda</natOp><mod>55</mod><serie>1</serie><nNF>43440</nNF><dhEmi>2026-08-06T10:30:00-03:00</dhEmi></ide>
+      <emit><CNPJ>09722463000646</CNPJ><xNome>TINTAS IQUINE LTDA</xNome></emit>
+      <dest><CNPJ>09580958000254</CNPJ><xNome>paraty</xNome></dest>
+      <det nItem="1"><prod><cProd>613305730R</cProd><cEAN>SEM GTIN</cEAN><xProd>CORANTE LIQUIDO PRETO 50ML</xProd><NCM>32091010</NCM><CFOP>5102</CFOP><uCom>UN</uCom><qCom>36.0000</qCom><vUnCom>2.020000</vUnCom><vProd>72.72</vProd></prod></det>
+      <total><ICMSTot><vNF>72.72</vNF></ICMSTot></total>
+    </infNFe>
+  </NFe>
+  <protNFe versao="4.00"><infProt><chNFe>33260809722463000646550010000434401938843899</chNFe><cStat>100</cStat></infProt></protNFe>
+</nfeProc>
+"""
+        with TemporaryDirectory() as temp_dir, override_settings(NFCH_STORAGE_ROOT=Path(temp_dir)):
+            relative_path = Path("planilha_pedido/2026/08/iquine_paraty.xlsx")
+            absolute_path = Path(temp_dir) / relative_path
+            absolute_path.parent.mkdir(parents=True, exist_ok=True)
+            absolute_path.write_bytes(stored_bytes)
+            Arquivo.objects.create(
+                empresa_cliente=empresa,
+                tipo=Arquivo.Tipo.PLANILHA_PEDIDO,
+                nome_original="IQUINE PARATY (4).xlsx",
+                tamanho=len(stored_bytes),
+                hash_sha256="iquine-paraty-stored".ljust(64, "0"),
+                caminho_relativo=relative_path.as_posix(),
+                usuario_importacao=self.user,
+            )
+            upload = SimpleUploadedFile("iquine.xml", xml, content_type="application/xml")
+
+            response = self.client.post(reverse("ui:fila"), {"xmls": upload}, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "planilha(s) armazenada(s) reprocessada(s)")
+        pedido = Pedido.objects.get(empresa_cliente=empresa)
+        nota = NotaFiscal.objects.get(empresa_cliente=empresa)
+        self.assertEqual(pedido.fornecedor.nome, "TINTAS IQUINE LTDA")
+        self.assertEqual(pedido.loja, loja)
+        candidata = ConferenciaCandidata.objects.get(conferencia__nota_fiscal=nota)
+        self.assertEqual(candidata.compatibilidade, Decimal("100.00"))
+
+    def test_xml_import_recovers_stored_spreadsheet_by_item_codes_for_any_supplier(self):
+        empresa = EmpresaCliente.objects.create(nome="Destiny In", codigo="destiny-any-supplier")
+        loja = Loja.objects.create(
+            empresa_cliente=empresa,
+            codigo="paraty",
+            nome="paraty",
+            cnpj="09.580.958/0002-54",
+        )
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["Codigo", "Descricao", "Quantidade"])
+        sheet.append(["ALF100", "Produto Alfa 100", 10])
+        sheet.append(["ALF200", "Produto Alfa 200", 5])
+        payload = BytesIO()
+        workbook.save(payload)
+        stored_bytes = payload.getvalue()
+        key = "9" * 44
+        xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe>
+    <infNFe Id="NFe{key}" versao="4.00">
+      <ide><natOp>Venda</natOp><mod>55</mod><serie>1</serie><nNF>90001</nNF><dhEmi>2026-08-06T10:30:00-03:00</dhEmi></ide>
+      <emit><CNPJ>12345678000199</CNPJ><xNome>FABRICA ALFA LTDA</xNome></emit>
+      <dest><CNPJ>09580958000254</CNPJ><xNome>paraty</xNome></dest>
+      <det nItem="1"><prod><cProd>ALF100</cProd><cEAN>SEM GTIN</cEAN><xProd>Produto Alfa 100</xProd><NCM>32091010</NCM><CFOP>5102</CFOP><uCom>UN</uCom><qCom>10.0000</qCom><vUnCom>1.000000</vUnCom><vProd>10.00</vProd></prod></det>
+      <det nItem="2"><prod><cProd>ALF200</cProd><cEAN>SEM GTIN</cEAN><xProd>Produto Alfa 200</xProd><NCM>32091010</NCM><CFOP>5102</CFOP><uCom>UN</uCom><qCom>5.0000</qCom><vUnCom>1.000000</vUnCom><vProd>5.00</vProd></prod></det>
+      <total><ICMSTot><vNF>15.00</vNF></ICMSTot></total>
+    </infNFe>
+  </NFe>
+  <protNFe versao="4.00"><infProt><chNFe>{key}</chNFe><cStat>100</cStat></infProt></protNFe>
+</nfeProc>
+""".encode("utf-8")
+        with TemporaryDirectory() as temp_dir, override_settings(NFCH_STORAGE_ROOT=Path(temp_dir)):
+            relative_path = Path("planilha_pedido/2026/08/paraty_alfa.xlsx")
+            absolute_path = Path(temp_dir) / relative_path
+            absolute_path.parent.mkdir(parents=True, exist_ok=True)
+            absolute_path.write_bytes(stored_bytes)
+            Arquivo.objects.create(
+                empresa_cliente=empresa,
+                tipo=Arquivo.Tipo.PLANILHA_PEDIDO,
+                nome_original="PEDIDO PARATY 001.xlsx",
+                tamanho=len(stored_bytes),
+                hash_sha256="any-supplier-stored".ljust(64, "0"),
+                caminho_relativo=relative_path.as_posix(),
+                usuario_importacao=self.user,
+            )
+            upload = SimpleUploadedFile("alfa.xml", xml, content_type="application/xml")
+
+            response = self.client.post(reverse("ui:fila"), {"xmls": upload}, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "planilha(s) armazenada(s) reprocessada(s)")
+        fornecedor = Fornecedor.objects.get(empresa_cliente=empresa)
+        self.assertEqual(fornecedor.nome, "FABRICA ALFA LTDA")
+        pedido = Pedido.objects.get(empresa_cliente=empresa)
+        self.assertEqual(pedido.fornecedor, fornecedor)
+        candidata = ConferenciaCandidata.objects.get(conferencia__nota_fiscal__empresa_cliente=empresa)
+        self.assertEqual(candidata.compatibilidade, Decimal("100.00"))
 
     def test_planilhas_summary_counts_distinct_orders(self):
         empresa = EmpresaCliente.objects.create(nome="Cliente", codigo="cliente-summary")
@@ -406,6 +579,77 @@ class UiPreviewTests(TestCase):
         self.assertContains(response, "Extra na NF")
         self.assertContains(response, "Saldo restante")
         self.assertNotContains(response, "AUSENTE_NF")
+
+    def test_fila_get_does_not_generate_missing_export(self):
+        empresa = EmpresaCliente.objects.create(nome="Cliente", codigo="cliente-fila-no-write")
+        loja = Loja.objects.create(empresa_cliente=empresa, codigo="matriz", nome="Matriz", cnpj="11.111.111/0001-11")
+        fornecedor = Fornecedor.objects.create(
+            empresa_cliente=empresa,
+            nome="Fornecedor",
+            cnpj="22.222.222/0001-22",
+        )
+        arquivo_pedido = Arquivo.objects.create(
+            empresa_cliente=empresa,
+            tipo=Arquivo.Tipo.PLANILHA_PEDIDO,
+            nome_original="PEDIDO MATRIZ.xlsx",
+            tamanho=10,
+            hash_sha256="hash-fila-no-write-pedido",
+            caminho_relativo="planilhas/pedido.xlsx",
+            usuario_importacao=self.user,
+        )
+        pedido = Pedido.objects.create(
+            empresa_cliente=empresa,
+            loja=loja,
+            fornecedor=fornecedor,
+            arquivo=arquivo_pedido,
+            data_operacional=timezone.localdate(),
+        )
+        arquivo_xml = Arquivo.objects.create(
+            empresa_cliente=empresa,
+            tipo=Arquivo.Tipo.XML_NFE,
+            nome_original="nfe.xml",
+            tamanho=10,
+            hash_sha256="hash-fila-no-write-xml",
+            caminho_relativo="xml/nfe.xml",
+            usuario_importacao=self.user,
+        )
+        nota = NotaFiscal.objects.create(
+            empresa_cliente=empresa,
+            arquivo_xml=arquivo_xml,
+            fornecedor=fornecedor,
+            loja=loja,
+            chave_acesso="2" * 44,
+            modelo="55",
+            numero="200",
+            serie="1",
+            data_emissao=timezone.now(),
+            emitente_cnpj=fornecedor.cnpj_normalizado,
+            emitente_nome=fornecedor.nome,
+            destinatario_cnpj=loja.cnpj_normalizado,
+            destinatario_nome=loja.nome,
+            status_conferencia=NotaFiscal.StatusConferencia.APROVADA,
+        )
+        conferencia = Conferencia.objects.create(empresa_cliente=empresa, nota_fiscal=nota)
+        candidata = ConferenciaCandidata.objects.create(
+            conferencia=conferencia,
+            pedido=pedido,
+            cobertura_itens=Decimal("100.00"),
+            cobertura_quantidades=Decimal("100.00"),
+            compatibilidade=Decimal("100.00"),
+            nivel=ConferenciaCandidata.Nivel.ALTA,
+        )
+        Associacao.objects.create(
+            empresa_cliente=empresa,
+            nota_fiscal=nota,
+            pedido=pedido,
+            candidata=candidata,
+            aprovada_por=self.user,
+        )
+
+        response = self.client.get(reverse("ui:fila"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Exportacao.objects.filter(empresa_cliente=empresa).count(), 0)
 
     def test_visualizador_menu_hides_admin_only_entries(self):
         empresa = EmpresaCliente.objects.create(nome="Cliente", codigo="cliente-menu")

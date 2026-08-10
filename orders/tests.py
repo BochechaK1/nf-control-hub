@@ -1,18 +1,20 @@
 from io import BytesIO
+import hashlib
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from openpyxl import Workbook
 
 from accounts.models import Usuario
-from diagnostics.models import Diagnostico
+from diagnostics.models import Diagnostico, TarefaProcessamento
 from files.models import Arquivo
 from organizations.models import EmpresaCliente, Fornecedor, Loja
 
 from .models import ItemPedido, Pedido
-from .services import import_coral_order_spreadsheet, normalize_code
+from .services import import_order_spreadsheet, normalize_code
 
 
 def workbook_upload(rows, filename="MATRIZ (2).xlsx"):
@@ -60,7 +62,7 @@ class CoralOrderImportTests(TestCase):
             ]
         )
 
-        result = import_coral_order_spreadsheet(
+        result = import_order_spreadsheet(
             empresa_cliente=self.empresa,
             loja=self.loja,
             fornecedor=self.fornecedor,
@@ -89,17 +91,27 @@ class CoralOrderImportTests(TestCase):
             ["CODIGO DO ITEM", "PRODUTO", "QUANTIDADE"],
             ["000123", "Tinta branco", "10"],
         ]
-        first = workbook_upload(rows)
-        second = workbook_upload(rows)
+        payload_file = workbook_upload(rows)
+        payload = payload_file.read()
+        first = SimpleUploadedFile(
+            payload_file.name,
+            payload,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        second = SimpleUploadedFile(
+            payload_file.name,
+            payload,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
 
-        import_coral_order_spreadsheet(
+        import_order_spreadsheet(
             empresa_cliente=self.empresa,
             loja=self.loja,
             fornecedor=self.fornecedor,
             uploaded_file=first,
             usuario=self.user,
         )
-        result = import_coral_order_spreadsheet(
+        result = import_order_spreadsheet(
             empresa_cliente=self.empresa,
             loja=self.loja,
             fornecedor=self.fornecedor,
@@ -119,7 +131,7 @@ class CoralOrderImportTests(TestCase):
             ]
         )
 
-        result = import_coral_order_spreadsheet(
+        result = import_order_spreadsheet(
             empresa_cliente=self.empresa,
             loja=self.loja,
             fornecedor=self.fornecedor,
@@ -131,6 +143,111 @@ class CoralOrderImportTests(TestCase):
         self.assertEqual(Pedido.objects.count(), 0)
         self.assertEqual(Diagnostico.objects.count(), 1)
         self.assertEqual(Diagnostico.objects.get().tipo, Diagnostico.Tipo.LINHA_INVALIDA)
+
+    def test_imports_iquine_layout_with_product_column_as_code(self):
+        upload = workbook_upload(
+            [
+                [None, None, "Tabela - Julho 2026", None, None, None, None, None, None, None, None, None],
+                [None, None, None, "COLUNA NOVA", None, None, None, None, None, None, None, None],
+                [
+                    None,
+                    "Produto",
+                    "Descrição",
+                    "PREÇO S/IMP",
+                    "PREÇO S/IMP",
+                    "PREÇO S/IMP 2026",
+                    "IPI",
+                    "PREÇO C/IPI",
+                    "ST",
+                    "PREÇO C/ST.",
+                    "QUANTID.",
+                    "TOTAL",
+                ],
+                ["AGUARRAS", "117100011", "AGUARRAS IQUINE 5,0 L", "54,94", "", "", "", "", "", "", "", "0"],
+                ["", "613305730R", "CORANTE LIQUIDO PRETO 50ML", "2,02", "", "", "", "", "", "", "36", "89,27"],
+                ["", "383332901", "DECORATTO CIM QUEIMADO CZ CLARO 5KG", "49,54", "", "", "", "", "", "", "4", "235,29"],
+                ["", "", "", "", "", "", "", "", "", "", "TOTAL", "324,56"],
+            ],
+            filename="IQUINE PARATY.xlsx",
+        )
+
+        self.fornecedor.nome = "Iquine"
+        self.fornecedor.save(update_fields=["nome"])
+        result = import_order_spreadsheet(
+            empresa_cliente=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            uploaded_file=upload,
+            usuario=self.user,
+        )
+
+        self.assertTrue(result.created)
+        self.assertEqual(Pedido.objects.count(), 1)
+        self.assertEqual(ItemPedido.objects.count(), 2)
+        first = ItemPedido.objects.get(codigo_original="613305730R")
+        self.assertEqual(first.codigo_normalizado, "613305730R")
+        self.assertEqual(first.produto_original, "CORANTE LIQUIDO PRETO 50ML")
+        self.assertEqual(first.quantidade_original, "36")
+        self.assertEqual(first.quantidade_pedida, first.saldo_cache)
+        self.assertEqual(str(first.preco_estimado), "2.0200")
+
+    def test_reprocesses_duplicate_file_that_only_had_diagnostic(self):
+        upload = workbook_upload(
+            [
+                ["CODIGO DO ITEM", "PRODUTO", "QUANTIDADE"],
+                ["000123", "Tinta branco", "10"],
+            ],
+            filename="IQUINE MATRIZ.xlsx",
+        )
+        payload = upload.read()
+        digest = hashlib.sha256(payload).hexdigest()
+        relative_path = Path("planilha_pedido/2026/08/iquine.xlsx")
+        absolute_path = settings.NFCH_STORAGE_ROOT / relative_path
+        absolute_path.parent.mkdir(parents=True, exist_ok=True)
+        absolute_path.write_bytes(payload)
+        arquivo = Arquivo.objects.create(
+            empresa_cliente=self.empresa,
+            tipo=Arquivo.Tipo.PLANILHA_PEDIDO,
+            nome_original=upload.name,
+            tamanho=len(payload),
+            hash_sha256=digest,
+            caminho_relativo=relative_path.as_posix(),
+            usuario_importacao=self.user,
+            situacao=Arquivo.Situacao.ERRO,
+        )
+        TarefaProcessamento.objects.create(
+            empresa_cliente=self.empresa,
+            arquivo=arquivo,
+            tipo=TarefaProcessamento.Tipo.IMPORTAR_PLANILHA,
+            estado=TarefaProcessamento.Estado.ERRO,
+            mensagem_usuario="Estrutura da planilha nao reconhecida.",
+        )
+        Diagnostico.objects.create(
+            empresa_cliente=self.empresa,
+            arquivo=arquivo,
+            tipo=Diagnostico.Tipo.ESTRUTURA_NAO_RECONHECIDA,
+            mensagem_usuario="Estrutura da planilha nao reconhecida.",
+            criado_por=self.user,
+        )
+
+        result = import_order_spreadsheet(
+            empresa_cliente=self.empresa,
+            loja=self.loja,
+            fornecedor=self.fornecedor,
+            uploaded_file=SimpleUploadedFile(
+                upload.name,
+                payload,
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+            usuario=self.user,
+        )
+
+        self.assertTrue(result.created)
+        self.assertFalse(result.duplicate)
+        self.assertEqual(Pedido.objects.count(), 1)
+        arquivo.refresh_from_db()
+        self.assertEqual(arquivo.situacao, Arquivo.Situacao.ARMAZENADO)
+        self.assertEqual(Diagnostico.objects.get().status, Diagnostico.Status.RESOLVIDO)
 
     def test_supplier_code_normalizes_leading_zeroes(self):
         self.assertEqual(normalize_code("000123"), "123")

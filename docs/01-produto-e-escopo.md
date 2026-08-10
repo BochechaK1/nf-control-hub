@@ -49,6 +49,12 @@ O papel Mestre não pode ser concedido por administradores comuns. Restrições 
 - PDFs/DANFEs opcionais como apoio;
 - importação manual pelo seletor de arquivos do navegador.
 
+O importador de planilhas deve detectar cabeçalhos equivalentes por fornecedor, sem depender de um layout fixo. Quando houver código, descrição e quantidade identificáveis, a planilha deve virar pedido; falhas devem ir para Diagnóstico com explicação objetiva.
+
+Fornecedor e loja devem ser identificados de forma conservadora. Se o nome do arquivo indicar um fornecedor diferente dos cadastrados, o sistema não pode associar automaticamente ao único fornecedor existente; deve bloquear a importação e pedir cadastro ou seleção correta.
+
+Quando o XML fiscal registrar automaticamente um novo fornecedor, planilhas já armazenadas e ainda sem pedido podem ser reprocessadas pelo sistema se houver loja compatível e evidência objetiva de pertencimento ao fornecedor fiscal: token distintivo do nome ou coincidência suficiente de códigos de itens entre planilha e NF.
+
 O histórico não depende de arquivos permanecerem na pasta de origem do usuário.
 
 ## Fluxo principal
@@ -59,7 +65,7 @@ O histórico não depende de arquivos permanecerem na pasta de origem do usuári
 4. Motor compara cada NF com pedidos candidatos e seus saldos.
 5. Fila mostra candidata, compatibilidade, alertas e comparação item a item.
 6. Administrador aprova, reprova ou escolhe outra planilha.
-7. Aprovação cria alocações, atualiza estados e gera cópia preenchida.
+7. Aprovação cria alocações, atualiza estados e gera cópia preenchida da planilha com dados de faturamento por item.
 8. Administrador confirma posteriormente o recebimento integral da NF.
 9. Relatórios consultam todo o histórico e permitem exportação autorizada.
 
@@ -92,4 +98,3 @@ O histórico não depende de arquivos permanecerem na pasta de origem do usuári
 ## Critério geral de sucesso
 
 O MVP precisa importar, conferir, explicar, aprovar, recalcular, receber, consultar e auditar sem modificar originais fiscais, duplicar NFs, perder saldos ou exigir manipulação manual de pastas.
-
