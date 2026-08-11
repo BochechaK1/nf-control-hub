@@ -24,10 +24,11 @@ from invoices.services import import_nfe_xml
 from matching.models import Conferencia, ConferenciaCandidata
 from matching.services import recalcular_conferencia_para_nota
 from orders.models import Pedido
-from orders.services import import_coral_order_spreadsheet
+from orders.services import import_existing_order_spreadsheet, import_order_spreadsheet, parse_order_workbook
 from organizations.models import EmpresaCliente, Fornecedor, Loja
 from audit.models import EventoAuditoria
 from reports.models import Exportacao
+from reports.services import COPIA_PREENCHIDA_OBSERVACAO
 from receiving.models import OcorrenciaRecebimento, Recebimento
 from receiving.services import (
     alerta_30_dias,
@@ -95,6 +96,43 @@ def _compact_lookup_value(value) -> str:
     return re.sub(r"[^A-Z0-9]+", "", _normalize_lookup_value(value))
 
 
+LOOKUP_FILE_TOKENS = {"XLSX", "XLS", "XML", "NFE", "PLANILHA", "PEDIDO"}
+SUPPLIER_GENERIC_TOKENS = {
+    "ATACADISTA",
+    "BRASIL",
+    "COMERCIO",
+    "COMERCIAL",
+    "DISTRIBUIDORA",
+    "DISTRIBUICAO",
+    "FABRICA",
+    "FABRICACAO",
+    "IMPORTADORA",
+    "INDUSTRIA",
+    "INDUSTRIAS",
+    "LTDA",
+    "MATERIAIS",
+    "MATERIAL",
+    "PRODUTO",
+    "PRODUTOS",
+    "QUIMICA",
+    "QUIMICAS",
+    "SOCIEDADE",
+    "TINTA",
+    "TINTAS",
+}
+
+
+def _distinctive_lookup_tokens(value) -> set[str]:
+    return {
+        token
+        for token in _normalize_lookup_value(value).split()
+        if len(token) >= 4
+        and not token.isdigit()
+        and token not in LOOKUP_FILE_TOKENS
+        and token not in SUPPLIER_GENERIC_TOKENS
+    }
+
+
 def _matches_lookup(filename: str, *candidates) -> bool:
     filename_normalized = _normalize_lookup_value(filename)
     filename_compact = _compact_lookup_value(filename)
@@ -112,6 +150,14 @@ def _matches_lookup(filename: str, *candidates) -> bool:
     return False
 
 
+def _matches_supplier_lookup(filename: str, supplier: Fornecedor) -> bool:
+    if _matches_lookup(filename, supplier.nome, supplier.cnpj_normalizado):
+        return True
+    filename_tokens = _distinctive_lookup_tokens(filename)
+    supplier_tokens = _distinctive_lookup_tokens(supplier.nome)
+    return bool(filename_tokens & supplier_tokens)
+
+
 def _single_item(queryset):
     items = list(queryset[:2])
     return items[0] if len(items) == 1 else None
@@ -127,6 +173,48 @@ def _infer_from_filename(filename: str, queryset, fields: tuple[str, ...]):
     if len(matches) > 1:
         return None, "ambigua"
     return None, "ausente"
+
+
+def _infer_supplier_from_filename(filename: str, suppliers):
+    matches = [supplier for supplier in suppliers if _matches_supplier_lookup(filename, supplier)]
+    if len(matches) == 1:
+        return matches[0], ""
+    if len(matches) > 1:
+        return None, "ambigua"
+    return None, "ausente"
+
+
+def _filename_has_unmatched_supplier_hint(filename: str, suppliers) -> bool:
+    filename_tokens = _distinctive_lookup_tokens(filename)
+    if not filename_tokens:
+        return False
+    supplier_tokens = set()
+    for supplier in suppliers:
+        supplier_tokens.update(_distinctive_lookup_tokens(f"{supplier.nome} {supplier.cnpj_normalizado}"))
+    return not bool(filename_tokens & supplier_tokens)
+
+
+def _stored_spreadsheet_matches_invoice_items(arquivo: Arquivo, nota_fiscal: NotaFiscal) -> bool:
+    try:
+        _, parsed_items = parse_order_workbook(settings.NFCH_STORAGE_ROOT / arquivo.caminho_relativo)
+    except Exception:
+        return False
+
+    spreadsheet_codes = {item.code_normalized for item in parsed_items if item.code_normalized}
+    invoice_codes = set(
+        nota_fiscal.itens.exclude(codigo_normalizado="").values_list("codigo_normalizado", flat=True)
+    )
+    if not spreadsheet_codes or not invoice_codes:
+        return False
+
+    matched_codes = spreadsheet_codes & invoice_codes
+    if not matched_codes:
+        return False
+    if len(invoice_codes) == 1:
+        return len(matched_codes) == 1
+
+    coverage = Decimal(len(matched_codes)) / Decimal(len(invoice_codes))
+    return len(matched_codes) >= 2 and coverage >= Decimal("0.50")
 
 
 def resolve_spreadsheet_context(user, filename: str, empresa_id: str, loja_id: str, fornecedor_id: str):
@@ -164,10 +252,12 @@ def resolve_spreadsheet_context(user, filename: str, empresa_id: str, loja_id: s
         supplier_scope = all_suppliers.filter(empresa_cliente=empresa)
 
     fornecedor_status = ""
+    supplier_scope_list = list(supplier_scope)
+    fornecedor_filename_hint_unmatched = _filename_has_unmatched_supplier_hint(filename, supplier_scope_list)
     if not fornecedor:
-        fornecedor = _single_item(supplier_scope)
+        fornecedor = None if fornecedor_filename_hint_unmatched else _single_item(supplier_scope_list)
     if not fornecedor:
-        fornecedor, fornecedor_status = _infer_from_filename(filename, supplier_scope, ("nome", "cnpj_normalizado"))
+        fornecedor, fornecedor_status = _infer_supplier_from_filename(filename, supplier_scope_list)
     if not empresa and fornecedor:
         empresa = fornecedor.empresa_cliente
         store_scope = all_stores.filter(empresa_cliente=empresa)
@@ -187,11 +277,46 @@ def resolve_spreadsheet_context(user, filename: str, empresa_id: str, loja_id: s
     if not loja:
         errors.append("loja ambigua" if loja_status == "ambigua" else "loja")
     if not fornecedor:
-        errors.append("fornecedor ambiguo" if fornecedor_status == "ambigua" else "fornecedor")
+        if fornecedor_status == "ambigua":
+            errors.append("fornecedor ambiguo")
+        elif fornecedor_filename_hint_unmatched:
+            errors.append("fornecedor nao cadastrado ou nao identificado pelo nome do arquivo")
+        else:
+            errors.append("fornecedor")
 
     if errors:
         return None, None, None, ", ".join(errors)
     return empresa, loja, fornecedor, ""
+
+
+def recover_stored_spreadsheets_for_invoice(nota_fiscal: NotaFiscal, user) -> list:
+    if not nota_fiscal.loja_id:
+        return []
+
+    recovered = []
+    stored_files = Arquivo.objects.filter(
+        empresa_cliente=nota_fiscal.empresa_cliente,
+        tipo=Arquivo.Tipo.PLANILHA_PEDIDO,
+        pedido__isnull=True,
+    ).order_by("importado_em", "id")
+    for arquivo in stored_files:
+        if not _matches_lookup(arquivo.nome_original, nota_fiscal.loja.nome, nota_fiscal.loja.codigo, nota_fiscal.loja.cnpj_normalizado):
+            continue
+        if not (
+            _matches_supplier_lookup(arquivo.nome_original, nota_fiscal.fornecedor)
+            or _stored_spreadsheet_matches_invoice_items(arquivo, nota_fiscal)
+        ):
+            continue
+        result = import_existing_order_spreadsheet(
+            empresa_cliente=nota_fiscal.empresa_cliente,
+            loja=nota_fiscal.loja,
+            fornecedor=nota_fiscal.fornecedor,
+            arquivo=arquivo,
+            usuario=user,
+        )
+        if result.pedido:
+            recovered.append(result)
+    return recovered
 
 
 def scoped_invoices(user):
@@ -381,13 +506,18 @@ def fila(request):
                 uploaded_file=uploaded_file,
                 usuario=request.user,
             )
+            recovered_orders = []
             if result.duplicate:
                 if result.nota_fiscal:
+                    recovered_orders = recover_stored_spreadsheets_for_invoice(result.nota_fiscal, request.user)
                     recalcular_conferencia_para_nota(result.nota_fiscal)
-                messages.warning(request, f"{uploaded_file.name}: XML duplicado, nenhuma nova NF criada.")
+                extra = f" {len(recovered_orders)} planilha(s) armazenada(s) reprocessada(s)." if recovered_orders else ""
+                messages.warning(request, f"{uploaded_file.name}: XML duplicado, nenhuma nova NF criada.{extra}")
             elif result.nota_fiscal:
+                recovered_orders = recover_stored_spreadsheets_for_invoice(result.nota_fiscal, request.user)
                 recalcular_conferencia_para_nota(result.nota_fiscal)
-                messages.success(request, f"{uploaded_file.name}: NF-e importada com sucesso.")
+                extra = f" {len(recovered_orders)} planilha(s) armazenada(s) reprocessada(s)." if recovered_orders else ""
+                messages.success(request, f"{uploaded_file.name}: NF-e importada com sucesso.{extra}")
             else:
                 messages.error(request, f"{uploaded_file.name}: enviado para Diagnostico.")
         return redirect("ui:fila")
@@ -420,11 +550,13 @@ def fila(request):
         )
         nota.status_tom = nota.status_conferencia.lower()
         nota.associacao_vigente = Associacao.objects.filter(nota_fiscal=nota, status=Associacao.Status.VIGENTE).first()
-        nota.exportacao_principal = (
-            nota.associacao_vigente.exportacoes.select_related("arquivo").first()
-            if nota.associacao_vigente
-            else None
-        )
+        nota.exportacao_principal = None
+        if nota.associacao_vigente:
+            nota.exportacao_principal = nota.associacao_vigente.exportacoes.select_related("arquivo").filter(
+                observacao=COPIA_PREENCHIDA_OBSERVACAO,
+            ).first()
+            if not nota.exportacao_principal:
+                nota.exportacao_principal = nota.associacao_vigente.exportacoes.select_related("arquivo").first()
         nota.detail_alternatives = (
             nota.conferencia_vigente.candidatas.exclude(id=nota.candidata_principal.id).select_related("pedido")[:5]
             if nota.conferencia_vigente and nota.candidata_principal
@@ -592,7 +724,7 @@ def planilhas(request):
                 )
                 continue
 
-            result = import_coral_order_spreadsheet(
+            result = import_order_spreadsheet(
                 empresa_cliente=empresa,
                 loja=loja,
                 fornecedor=fornecedor,
@@ -675,6 +807,8 @@ def relatorios(request):
         "arquivo",
         "associacao",
         "associacao__pedido",
+        "associacao__pedido__arquivo",
+        "associacao__pedido__loja",
         "associacao__nota_fiscal",
     )
     if request.user.is_visualizador:

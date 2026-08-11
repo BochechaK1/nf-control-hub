@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
+from openpyxl import Workbook, load_workbook
 
 from accounts.models import Usuario, UsuarioLoja
 from approvals.services import aprovar_candidata
@@ -65,11 +66,21 @@ class ExportAndDownloadTests(TestCase):
         )
 
     def make_approved_association(self):
+        arquivo_pedido = self.arquivo(Arquivo.Tipo.PLANILHA_PEDIDO)
+        workbook = Workbook()
+        ws = workbook.active
+        ws.title = "Pedido"
+        ws.append(["Codigo", "Produto", "Quantidade"])
+        ws.append(["000123", "Tinta branco", 10])
+        original_path = Path(self.tmp.name) / arquivo_pedido.caminho_relativo
+        workbook.save(original_path)
+        workbook.close()
+
         pedido = Pedido.objects.create(
             empresa_cliente=self.empresa,
             loja=self.loja,
             fornecedor=self.fornecedor,
-            arquivo=self.arquivo(Arquivo.Tipo.PLANILHA_PEDIDO),
+            arquivo=arquivo_pedido,
             numero_pedido="P-001",
             data_operacional=timezone.localdate(),
         )
@@ -78,7 +89,7 @@ class ExportAndDownloadTests(TestCase):
             empresa_cliente=self.empresa,
             fornecedor=self.fornecedor,
             aba="Pedido",
-            linha=1,
+            linha=2,
             codigo_original="000123",
             codigo_normalizado="123",
             produto_original="Tinta branco",
@@ -103,6 +114,7 @@ class ExportAndDownloadTests(TestCase):
             emitente_nome=self.fornecedor.nome,
             destinatario_cnpj=self.loja.cnpj_normalizado,
             destinatario_nome=self.loja.nome,
+            valor_total=Decimal("999.00"),
         )
         ItemNotaFiscal.objects.create(
             nota_fiscal=nota,
@@ -126,8 +138,24 @@ class ExportAndDownloadTests(TestCase):
         export = Exportacao.objects.get(associacao=association)
         path = Path(self.tmp.name) / export.arquivo.caminho_relativo
         self.assertEqual(export.tipo, Exportacao.Tipo.COPIA_PREENCHIDA)
+        self.assertEqual(export.arquivo.nome_original, "arquivo-1_NF_100_SERIE_1_matriz_preenchida.xlsx")
+        self.assertTrue(Path(export.arquivo.caminho_relativo).name.endswith(export.arquivo.nome_original))
         self.assertTrue(path.exists())
         self.assertGreater(export.arquivo.tamanho, 0)
+        workbook = load_workbook(path)
+        try:
+            ws = workbook["Pedido"]
+            self.assertEqual(ws["E1"].value, "NFCH - Qtd faturada")
+            self.assertEqual(ws["F1"].value, "NFCH - Numero NF")
+            self.assertEqual(ws["H1"].value, "NFCH - Data faturamento")
+            self.assertEqual(ws["I1"].value, "NFCH - Valor total NF")
+            self.assertEqual(ws["E2"].value, 10)
+            self.assertEqual(ws["F2"].value, "100")
+            self.assertEqual(ws["G2"].value, "1")
+            self.assertEqual(ws["H2"].value.date(), timezone.localtime(association.nota_fiscal.data_emissao).date())
+            self.assertEqual(ws["I2"].value, 999)
+        finally:
+            workbook.close()
 
     def test_authorized_viewer_can_download_store_file(self):
         association = self.make_approved_association()
@@ -142,6 +170,18 @@ class ExportAndDownloadTests(TestCase):
             self.assertEqual(response["Content-Type"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         finally:
             response.close()
+
+    def test_reports_export_list_identifies_original_spreadsheet(self):
+        self.make_approved_association()
+        client = Client()
+        client.force_login(self.admin)
+
+        response = client.get(reverse("ui:relatorios"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "arquivo-1.xlsx")
+        self.assertContains(response, "NF 100/1")
+        self.assertContains(response, "arquivo-1_NF_100_SERIE_1_matriz_preenchida.xlsx")
 
     def test_viewer_cannot_download_unlinked_store_file(self):
         association = self.make_approved_association()

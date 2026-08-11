@@ -106,7 +106,13 @@
                         <article class="export-card">
                             <div>
                                 <span class="eyebrow">{{ exportacao.get_tipo_display }}</span>
-                                <strong>{{ exportacao.arquivo.nome_original }}</strong>
+                                {% if exportacao.associacao %}
+                                    <strong>{{ exportacao.associacao.pedido.arquivo.nome_original }}</strong>
+                                    <small>NF {{ exportacao.associacao.nota_fiscal.numero }}/{{ exportacao.associacao.nota_fiscal.serie }} - {{ exportacao.associacao.pedido.loja.nome }}</small>
+                                    <small>{{ exportacao.arquivo.nome_original }}</small>
+                                {% else %}
+                                    <strong>{{ exportacao.arquivo.nome_original }}</strong>
+                                {% endif %}
                                 <small>{{ exportacao.gerada_em|date:"d/m/Y H:i" }}</small>
                             </div>
                             <a class="text-link" href="{% url 'ui:download_arquivo' exportacao.arquivo.id %}">Baixar</a>

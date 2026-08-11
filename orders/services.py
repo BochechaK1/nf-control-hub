@@ -14,7 +14,7 @@ from audit.services import registrar_evento
 from diagnostics.models import Diagnostico, TarefaProcessamento
 from diagnostics.services import registrar_diagnostico
 from files.models import Arquivo
-from files.services import store_uploaded_file
+from files.services import StoredFileResult, store_uploaded_file
 
 from .models import ItemPedido, ModeloPlanilha, ModeloPlanilhaVersao, Pedido
 
@@ -54,12 +54,52 @@ class OrderImportResult:
 
 
 HEADER_ALIASES = {
-    "code": {"CODIGO DO ITEM", "CODIGO", "COD ITEM", "CODIGO ITEM", "ITEM", "COD"},
-    "product": {"PRODUTO", "DESCRICAO", "DESCRICAO DO ITEM", "NOME DO PRODUTO", "MATERIAL"},
-    "quantity": {"QUANTIDADE", "QTD", "QTDE", "QTD PEDIDA", "QUANT"},
+    "code": {
+        "CODIGO DO ITEM",
+        "CODIGO",
+        "COD ITEM",
+        "CODIGO ITEM",
+        "COD PRODUTO",
+        "CODIGO PRODUTO",
+        "REFERENCIA",
+        "REF",
+        "SKU",
+        "ITEM",
+        "COD",
+    },
+    "product": {
+        "PRODUTO",
+        "DESCRICAO",
+        "DESCRICAO DO ITEM",
+        "DESCRICAO PRODUTO",
+        "NOME DO PRODUTO",
+        "MATERIAL",
+        "ITEM",
+    },
+    "quantity": {
+        "QUANTIDADE",
+        "QUANTID",
+        "QTD",
+        "QTDE",
+        "QDE",
+        "QTD PEDIDA",
+        "QTDE PEDIDA",
+        "QUANT",
+        "PEDIDO",
+    },
     "unit": {"UNIDADE", "UN", "UND", "UNID"},
     "size": {"TAMANHO", "CONTEUDO", "MEDIDA", "EMBALAGEM"},
-    "price": {"PRECO", "PRECO ESTIMADO", "VALOR", "VLR UNIT", "VALOR UNITARIO"},
+    "price": {
+        "PRECO",
+        "PRECO ESTIMADO",
+        "PRECO SIMP",
+        "PRECO S IMP",
+        "PRECO CIPI",
+        "PRECO CST",
+        "VALOR",
+        "VLR UNIT",
+        "VALOR UNITARIO",
+    },
 }
 
 
@@ -68,6 +108,10 @@ def normalize_text(value) -> str:
     decomposed = unicodedata.normalize("NFKD", text)
     without_accents = "".join(char for char in decomposed if not unicodedata.combining(char))
     return re.sub(r"\s+", " ", without_accents).upper()
+
+
+def normalize_header(value) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^A-Z0-9]+", " ", normalize_text(value))).strip()
 
 
 def normalize_code(value) -> str:
@@ -111,24 +155,48 @@ def original_value(value) -> str:
 
 
 def find_header(row) -> dict[str, int]:
-    normalized_cells = [normalize_text(cell.value) for cell in row]
+    normalized_cells = [normalize_header(cell.value) for cell in row]
     mapping: dict[str, int] = {}
-    for field, aliases in HEADER_ALIASES.items():
+    used_indexes: set[int] = set()
+
+    code_aliases = set(HEADER_ALIASES["code"])
+    if any(value.startswith("DESCRICAO") for value in normalized_cells):
+        code_aliases.add("PRODUTO")
+    for index, value in enumerate(normalized_cells):
+        if index not in used_indexes and value in code_aliases:
+            mapping["code"] = index
+            used_indexes.add(index)
+            break
+
+    product_aliases = [alias for alias in HEADER_ALIASES["product"] if alias != "PRODUTO"]
+    product_aliases.append("PRODUTO")
+    for alias in product_aliases:
         for index, value in enumerate(normalized_cells):
-            if value in aliases:
+            if index not in used_indexes and value == alias:
+                mapping["product"] = index
+                used_indexes.add(index)
+                break
+        if "product" in mapping:
+            break
+
+    for field in ("quantity", "unit", "size", "price"):
+        aliases = HEADER_ALIASES[field]
+        for index, value in enumerate(normalized_cells):
+            if index not in used_indexes and value in aliases:
                 mapping[field] = index
+                used_indexes.add(index)
                 break
     return mapping
 
 
 def detect_header(sheet) -> tuple[int, dict[str, int]]:
-    for row in sheet.iter_rows(min_row=1, max_row=30):
+    for row_number, row in enumerate(sheet.iter_rows(min_row=1, max_row=30), start=1):
         mapping = find_header(row)
         if {"code", "product", "quantity"}.issubset(mapping):
-            return row[0].row, mapping
+            return row_number, mapping
     raise SpreadsheetImportError(
         "Estrutura da planilha nao reconhecida.",
-        "Cabecalhos obrigatorios nao encontrados: CODIGO DO ITEM, PRODUTO/DESCRICAO e QUANTIDADE.",
+        "Cabecalhos obrigatorios nao encontrados: codigo/produto, descricao/produto e quantidade.",
     )
 
 
@@ -145,7 +213,7 @@ def detect_order_number(workbook) -> str:
     return ""
 
 
-def parse_coral_workbook(path: Path) -> tuple[str, list[ParsedOrderItem]]:
+def parse_order_workbook(path: Path) -> tuple[str, list[ParsedOrderItem]]:
     try:
         workbook = load_workbook(filename=path, data_only=True, read_only=True)
     except Exception as exc:
@@ -156,18 +224,20 @@ def parse_coral_workbook(path: Path) -> tuple[str, list[ParsedOrderItem]]:
         negative_rows: list[str] = []
         for sheet in workbook.worksheets:
             header_row, mapping = detect_header(sheet)
-            for row in sheet.iter_rows(min_row=header_row + 1):
+            for row_number, row in enumerate(sheet.iter_rows(min_row=header_row + 1), start=header_row + 1):
+                code_raw = original_value(row[mapping["code"]].value)
+                product_raw = original_value(row[mapping["product"]].value)
+                if not code_raw and not product_raw:
+                    continue
+                if normalize_header(code_raw) in HEADER_ALIASES["code"] or normalize_header(product_raw) in HEADER_ALIASES["product"]:
+                    continue
+
                 quantity_raw = original_value(row[mapping["quantity"]].value)
                 quantity = normalize_decimal(row[mapping["quantity"]].value)
                 if quantity is None or quantity == 0:
                     continue
                 if quantity < 0:
-                    negative_rows.append(f"{sheet.title}!{row[0].row}")
-                    continue
-
-                code_raw = original_value(row[mapping["code"]].value)
-                product_raw = original_value(row[mapping["product"]].value)
-                if not code_raw and not product_raw:
+                    negative_rows.append(f"{sheet.title}!{row_number}")
                     continue
 
                 price_raw = original_value(row[mapping["price"]].value) if "price" in mapping else ""
@@ -178,7 +248,7 @@ def parse_coral_workbook(path: Path) -> tuple[str, list[ParsedOrderItem]]:
                 items.append(
                     ParsedOrderItem(
                         sheet=sheet.title,
-                        row_number=row[0].row,
+                        row_number=row_number,
                         code_raw=code_raw,
                         code_normalized=normalize_code(code_raw),
                         product_raw=product_raw,
@@ -210,45 +280,56 @@ def parse_coral_workbook(path: Path) -> tuple[str, list[ParsedOrderItem]]:
         workbook.close()
 
 
-def get_or_create_coral_model(*, empresa_cliente, fornecedor) -> ModeloPlanilhaVersao:
+def parse_coral_workbook(path: Path) -> tuple[str, list[ParsedOrderItem]]:
+    return parse_order_workbook(path)
+
+
+def get_or_create_spreadsheet_model(*, empresa_cliente, fornecedor) -> ModeloPlanilhaVersao:
     modelo, _ = ModeloPlanilha.objects.get_or_create(
         empresa_cliente=empresa_cliente,
         fornecedor=fornecedor,
-        nome="Coral",
+        nome=fornecedor.nome[:120],
     )
     versao, _ = ModeloPlanilhaVersao.objects.get_or_create(
         modelo=modelo,
         versao=1,
-        defaults={"configuracao": {"adapter": "coral_v1"}},
+        defaults={"configuracao": {"adapter": "generic_spreadsheet_v2"}},
     )
     return versao
 
 
-def import_coral_order_spreadsheet(*, empresa_cliente, loja, fornecedor, uploaded_file, usuario) -> OrderImportResult:
-    stored = store_uploaded_file(
-        empresa_cliente=empresa_cliente,
-        uploaded_file=uploaded_file,
-        usuario=usuario,
-        tipo=Arquivo.Tipo.PLANILHA_PEDIDO,
-    )
+def get_or_create_coral_model(*, empresa_cliente, fornecedor) -> ModeloPlanilhaVersao:
+    return get_or_create_spreadsheet_model(empresa_cliente=empresa_cliente, fornecedor=fornecedor)
 
+
+def _import_stored_order_spreadsheet(*, empresa_cliente, loja, fornecedor, stored: StoredFileResult, usuario) -> OrderImportResult:
+    if stored.arquivo.empresa_cliente_id != empresa_cliente.id or stored.arquivo.tipo != Arquivo.Tipo.PLANILHA_PEDIDO:
+        raise ValueError("Arquivo armazenado nao pertence a esta empresa ou nao e uma planilha de pedido.")
     if stored.duplicate:
         pedido = Pedido.objects.filter(arquivo=stored.arquivo).first()
-        return OrderImportResult(arquivo=stored.arquivo, pedido=pedido, created=False, duplicate=True)
+        if pedido:
+            return OrderImportResult(arquivo=stored.arquivo, pedido=pedido, created=False, duplicate=True)
 
-    tarefa = TarefaProcessamento.objects.create(
+    tarefa, _ = TarefaProcessamento.objects.get_or_create(
         empresa_cliente=empresa_cliente,
         arquivo=stored.arquivo,
         tipo=TarefaProcessamento.Tipo.IMPORTAR_PLANILHA,
-        estado=TarefaProcessamento.Estado.PROCESSANDO,
-        progresso=10,
+        defaults={
+            "estado": TarefaProcessamento.Estado.PROCESSANDO,
+            "progresso": 10,
+        },
     )
+    tarefa.estado = TarefaProcessamento.Estado.PROCESSANDO
+    tarefa.progresso = 10
+    tarefa.mensagem_usuario = ""
+    tarefa.erro_tecnico = ""
+    tarefa.save(update_fields=["estado", "progresso", "mensagem_usuario", "erro_tecnico", "atualizada_em"])
     path = settings.NFCH_STORAGE_ROOT / stored.arquivo.caminho_relativo
 
     try:
-        numero_pedido, parsed_items = parse_coral_workbook(path)
+        numero_pedido, parsed_items = parse_order_workbook(path)
         with transaction.atomic():
-            modelo_versao = get_or_create_coral_model(empresa_cliente=empresa_cliente, fornecedor=fornecedor)
+            modelo_versao = get_or_create_spreadsheet_model(empresa_cliente=empresa_cliente, fornecedor=fornecedor)
             pedido = Pedido.objects.create(
                 empresa_cliente=empresa_cliente,
                 loja=loja,
@@ -299,6 +380,13 @@ def import_coral_order_spreadsheet(*, empresa_cliente, loja, fornecedor, uploade
                     "itens": len(parsed_items),
                 },
             )
+            Diagnostico.objects.filter(
+                arquivo=stored.arquivo,
+                status=Diagnostico.Status.ABERTO,
+            ).update(status=Diagnostico.Status.RESOLVIDO)
+            if stored.arquivo.situacao != Arquivo.Situacao.ARMAZENADO:
+                stored.arquivo.situacao = Arquivo.Situacao.ARMAZENADO
+                stored.arquivo.save(update_fields=["situacao"])
         return OrderImportResult(arquivo=stored.arquivo, pedido=pedido, created=True, duplicate=False)
     except SpreadsheetImportError as exc:
         stored.arquivo.situacao = Arquivo.Situacao.ERRO
@@ -317,3 +405,39 @@ def import_coral_order_spreadsheet(*, empresa_cliente, loja, fornecedor, uploade
             criado_por=usuario,
         )
         return OrderImportResult(arquivo=stored.arquivo, pedido=None, created=False, duplicate=False, diagnostics_count=1)
+
+
+def import_order_spreadsheet(*, empresa_cliente, loja, fornecedor, uploaded_file, usuario) -> OrderImportResult:
+    stored = store_uploaded_file(
+        empresa_cliente=empresa_cliente,
+        uploaded_file=uploaded_file,
+        usuario=usuario,
+        tipo=Arquivo.Tipo.PLANILHA_PEDIDO,
+    )
+    return _import_stored_order_spreadsheet(
+        empresa_cliente=empresa_cliente,
+        loja=loja,
+        fornecedor=fornecedor,
+        stored=stored,
+        usuario=usuario,
+    )
+
+
+def import_existing_order_spreadsheet(*, empresa_cliente, loja, fornecedor, arquivo: Arquivo, usuario) -> OrderImportResult:
+    return _import_stored_order_spreadsheet(
+        empresa_cliente=empresa_cliente,
+        loja=loja,
+        fornecedor=fornecedor,
+        stored=StoredFileResult(arquivo=arquivo, created=False, duplicate=True),
+        usuario=usuario,
+    )
+
+
+def import_coral_order_spreadsheet(*, empresa_cliente, loja, fornecedor, uploaded_file, usuario) -> OrderImportResult:
+    return import_order_spreadsheet(
+        empresa_cliente=empresa_cliente,
+        loja=loja,
+        fornecedor=fornecedor,
+        uploaded_file=uploaded_file,
+        usuario=usuario,
+    )
