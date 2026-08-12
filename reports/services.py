@@ -12,17 +12,17 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from audit.models import EventoAuditoria
 from audit.services import registrar_evento
 from files.models import Arquivo
+from orders.services import SpreadsheetImportError, detect_header
 
 from .models import Exportacao
 
 
-COPIA_PREENCHIDA_OBSERVACAO = "Copia preenchida NFCH v2 com dados de faturamento por item."
+COPIA_PREENCHIDA_OBSERVACAO = "Copia preenchida NFCH v4 com cabecalho operacional na linha original."
 FATURAMENTO_HEADERS = [
-    "NFCH - Qtd faturada",
-    "NFCH - Numero NF",
-    "NFCH - Serie NF",
-    "NFCH - Data faturamento",
-    "NFCH - Valor total NF",
+    "quantidade faturada",
+    "numero da nota",
+    "valor da nota",
+    "data do faturamento",
 ]
 
 
@@ -69,6 +69,15 @@ def _prepare_nfch_columns(ws, header_row: int) -> int:
     return start_col
 
 
+def _detect_export_header_row(ws, sheet_allocations) -> int:
+    try:
+        header_row, _ = detect_header(ws)
+        return header_row
+    except SpreadsheetImportError:
+        first_item_row = min(allocation.item_pedido.linha for allocation in sheet_allocations)
+        return max(1, first_item_row - 1)
+
+
 def _fill_billing_columns(*, workbook: Workbook, associacao) -> None:
     nota = associacao.nota_fiscal
     data_faturamento = timezone.localtime(nota.data_emissao).date()
@@ -85,8 +94,7 @@ def _fill_billing_columns(*, workbook: Workbook, associacao) -> None:
         if sheet_name not in workbook.sheetnames:
             continue
         ws = workbook[sheet_name]
-        first_item_row = min(allocation.item_pedido.linha for allocation in sheet_allocations)
-        header_row = max(1, first_item_row - 1)
+        header_row = _detect_export_header_row(ws, sheet_allocations)
         start_col = _prepare_nfch_columns(ws, header_row)
 
         for allocation in sheet_allocations:
@@ -94,18 +102,17 @@ def _fill_billing_columns(*, workbook: Workbook, associacao) -> None:
             values = [
                 allocation.quantidade,
                 nota.numero,
-                nota.serie,
-                data_faturamento,
                 nota.valor_total,
+                data_faturamento,
             ]
             for offset, value in enumerate(values):
                 cell = ws.cell(row=row, column=start_col + offset, value=value)
                 if offset == 0:
                     cell.number_format = "0.0000"
+                elif offset == 2:
+                    cell.number_format = '#,##0.00'
                 elif offset == 3:
                     cell.number_format = "DD/MM/YYYY"
-                elif offset == 4:
-                    cell.number_format = '#,##0.00'
 
 
 @transaction.atomic

@@ -319,6 +319,13 @@ def recover_stored_spreadsheets_for_invoice(nota_fiscal: NotaFiscal, user) -> li
     return recovered
 
 
+def describe_order_for_queue(pedido: Pedido | None) -> str:
+    if not pedido:
+        return "Sem candidata"
+    loja = pedido.loja.nome if pedido.loja_id else "loja pendente"
+    return f"{pedido.arquivo.nome_original} - {loja}"
+
+
 def scoped_invoices(user):
     invoices = NotaFiscal.objects.filter(empresa_cliente__in=scoped_companies(user))
     if user.is_visualizador:
@@ -531,13 +538,24 @@ def fila(request):
     }
     notas = list(notas_qs[:50])
     for nota in notas:
+        nota.associacao_vigente = Associacao.objects.filter(nota_fiscal=nota, status=Associacao.Status.VIGENTE).select_related(
+            "candidata",
+            "pedido",
+        ).first()
         nota.conferencia_vigente = (
             Conferencia.objects.filter(nota_fiscal=nota, vigente=True)
             .prefetch_related("candidatas")
             .first()
         )
-        nota.candidata_principal = nota.conferencia_vigente.candidatas.first() if nota.conferencia_vigente else None
+        nota.candidata_principal = (
+            nota.associacao_vigente.candidata
+            if nota.associacao_vigente
+            else nota.conferencia_vigente.candidatas.first() if nota.conferencia_vigente else None
+        )
         nota.alertas_preview = nota.candidata_principal.alertas[:3] if nota.candidata_principal else []
+        nota.pedido_descricao = describe_order_for_queue(
+            nota.candidata_principal.pedido if nota.candidata_principal else None
+        )
         nota.nivel_tom = nota.candidata_principal.nivel.lower() if nota.candidata_principal else "baixa"
         nota.compat_percent = format(nota.candidata_principal.compatibilidade, "f") if nota.candidata_principal else "0"
         nota.aprovacao_exige_justificativa = bool(
@@ -549,7 +567,6 @@ def fila(request):
             )
         )
         nota.status_tom = nota.status_conferencia.lower()
-        nota.associacao_vigente = Associacao.objects.filter(nota_fiscal=nota, status=Associacao.Status.VIGENTE).first()
         nota.exportacao_principal = None
         if nota.associacao_vigente:
             nota.exportacao_principal = nota.associacao_vigente.exportacoes.select_related("arquivo").filter(
@@ -562,6 +579,8 @@ def fila(request):
             if nota.conferencia_vigente and nota.candidata_principal
             else []
         )
+        for alternativa in nota.detail_alternatives:
+            alternativa.pedido_descricao = describe_order_for_queue(alternativa.pedido)
         nota.detail_items = (
             nota.candidata_principal.itens.select_related("item_nota_fiscal", "item_pedido")
             if nota.candidata_principal

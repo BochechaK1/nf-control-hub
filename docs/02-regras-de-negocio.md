@@ -120,7 +120,7 @@ Empate apresenta o pedido mais antigo primeiro, mas mantém associação ambígu
 - Divergência exige explicação simples e objetiva.
 - Troca manual de planilha recalcula tudo e exige justificativa.
 - Aprovação cria associação e alocações em transação com nova validação dos saldos.
-- A cópia preenchida gerada após aprovação é uma saída operacional da planilha do pedido, com colunas de faturamento por item alocado: quantidade faturada, número da NF, série, data de faturamento e valor total da NF.
+- A cópia preenchida gerada após aprovação é uma saída operacional da planilha do pedido, com colunas de faturamento no cabeçalho original e por item alocado: quantidade faturada, número da NF, valor da nota e data do faturamento.
 - O nome exibido e baixado da cópia preenchida deve identificar a planilha original, a NF, a série e a loja, sem depender apenas de identificador técnico.
 - Concorrência ou mudança de saldo bloqueia e recalcula.
 - Reprovação não apaga a NF; remove-a da Fila e registra relatório/histórico.

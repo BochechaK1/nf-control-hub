@@ -651,6 +651,138 @@ class UiPreviewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(Exportacao.objects.filter(empresa_cliente=empresa).count(), 0)
 
+    def test_fila_approved_invoice_uses_approved_candidate_snapshot(self):
+        empresa = EmpresaCliente.objects.create(nome="Cliente", codigo="cliente-fila-approved-snapshot")
+        loja = Loja.objects.create(empresa_cliente=empresa, codigo="paraty", nome="paraty", cnpj="09.580.958/0002-54")
+        fornecedor = Fornecedor.objects.create(
+            empresa_cliente=empresa,
+            nome="Akzo Nobel Ltda / Coral",
+            cnpj="60.561.719/0095-03",
+        )
+        arquivo_pedido = Arquivo.objects.create(
+            empresa_cliente=empresa,
+            tipo=Arquivo.Tipo.PLANILHA_PEDIDO,
+            nome_original="CORAL PARATY 001.xlsx",
+            tamanho=10,
+            hash_sha256="hash-approved-snapshot-pedido",
+            caminho_relativo="planilhas/coral-paraty.xlsx",
+            usuario_importacao=self.user,
+        )
+        pedido = Pedido.objects.create(
+            empresa_cliente=empresa,
+            loja=loja,
+            fornecedor=fornecedor,
+            arquivo=arquivo_pedido,
+            data_operacional=timezone.localdate(),
+            estado=Pedido.Estado.PARCIALMENTE_FATURADA,
+        )
+        item_pedido = ItemPedido.objects.create(
+            pedido=pedido,
+            empresa_cliente=empresa,
+            fornecedor=fornecedor,
+            aba="Pedido",
+            linha=2,
+            codigo_original="5202334",
+            codigo_normalizado="5202334",
+            produto_original="Produto aprovado",
+            produto_normalizado="PRODUTO APROVADO",
+            quantidade_original="8",
+            quantidade_pedida=Decimal("8.000"),
+            saldo_cache=Decimal("0.000"),
+            faturado_cache=Decimal("8.000"),
+        )
+        arquivo_xml = Arquivo.objects.create(
+            empresa_cliente=empresa,
+            tipo=Arquivo.Tipo.XML_NFE,
+            nome_original="nfe.xml",
+            tamanho=10,
+            hash_sha256="hash-approved-snapshot-xml",
+            caminho_relativo="xml/nfe.xml",
+            usuario_importacao=self.user,
+        )
+        nota = NotaFiscal.objects.create(
+            empresa_cliente=empresa,
+            arquivo_xml=arquivo_xml,
+            fornecedor=fornecedor,
+            loja=loja,
+            chave_acesso="3" * 44,
+            modelo="55",
+            numero="1993215",
+            serie="21",
+            data_emissao=timezone.now(),
+            emitente_cnpj=fornecedor.cnpj_normalizado,
+            emitente_nome=fornecedor.nome,
+            destinatario_cnpj=loja.cnpj_normalizado,
+            destinatario_nome=loja.nome,
+            status_conferencia=NotaFiscal.StatusConferencia.APROVADA,
+        )
+        item_nf = ItemNotaFiscal.objects.create(
+            nota_fiscal=nota,
+            empresa_cliente=empresa,
+            numero_item=1,
+            codigo_original="000000000005202334",
+            codigo_normalizado="5202334",
+            descricao_original="Produto aprovado NF",
+            descricao_normalizada="PRODUTO APROVADO NF",
+            unidade_original="UN",
+            unidade_normalizada="UN",
+            quantidade_original="8.0000",
+            quantidade=Decimal("8.0000"),
+        )
+        approved_conf = Conferencia.objects.create(empresa_cliente=empresa, nota_fiscal=nota, vigente=False)
+        approved_candidate = ConferenciaCandidata.objects.create(
+            conferencia=approved_conf,
+            pedido=pedido,
+            cobertura_itens=Decimal("100.00"),
+            cobertura_quantidades=Decimal("100.00"),
+            compatibilidade=Decimal("100.00"),
+            nivel=ConferenciaCandidata.Nivel.ALTA,
+        )
+        ConferenciaItem.objects.create(
+            candidata=approved_candidate,
+            item_nota_fiscal=item_nf,
+            item_pedido=item_pedido,
+            resultado=ConferenciaItem.Resultado.CONFIRMADO,
+            quantidade_nf=Decimal("8.0000"),
+            saldo_pedido=Decimal("8.0000"),
+            quantidade_cabe=Decimal("8.0000"),
+            ordem=1,
+        )
+        current_conf = Conferencia.objects.create(empresa_cliente=empresa, nota_fiscal=nota, vigente=True)
+        current_candidate = ConferenciaCandidata.objects.create(
+            conferencia=current_conf,
+            pedido=pedido,
+            cobertura_itens=Decimal("0.00"),
+            cobertura_quantidades=Decimal("0.00"),
+            compatibilidade=Decimal("0.00"),
+            nivel=ConferenciaCandidata.Nivel.BAIXA,
+            alertas=["EXTRA_NF"],
+        )
+        ConferenciaItem.objects.create(
+            candidata=current_candidate,
+            item_nota_fiscal=item_nf,
+            resultado=ConferenciaItem.Resultado.EXTRA_NF,
+            quantidade_nf=Decimal("8.0000"),
+            ordem=1,
+        )
+        Associacao.objects.create(
+            empresa_cliente=empresa,
+            nota_fiscal=nota,
+            pedido=pedido,
+            candidata=approved_candidate,
+            aprovada_por=self.user,
+        )
+
+        response = self.client.get(reverse("ui:fila"))
+
+        self.assertEqual(response.status_code, 200)
+        shown_note = response.context["notas"][0]
+        self.assertEqual(shown_note.candidata_principal, approved_candidate)
+        self.assertEqual(shown_note.candidata_principal.compatibilidade, Decimal("100.00"))
+        self.assertEqual(list(shown_note.detail_items)[0].resultado, ConferenciaItem.Resultado.CONFIRMADO)
+        self.assertContains(response, "CORAL PARATY 001.xlsx - paraty")
+        self.assertNotContains(response, str(pedido.id))
+
     def test_visualizador_menu_hides_admin_only_entries(self):
         empresa = EmpresaCliente.objects.create(nome="Cliente", codigo="cliente-menu")
         viewer = Usuario.objects.create_user(

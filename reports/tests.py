@@ -71,6 +71,7 @@ class ExportAndDownloadTests(TestCase):
         ws = workbook.active
         ws.title = "Pedido"
         ws.append(["Codigo", "Produto", "Quantidade"])
+        ws.append(["", "", ""])
         ws.append(["000123", "Tinta branco", 10])
         original_path = Path(self.tmp.name) / arquivo_pedido.caminho_relativo
         workbook.save(original_path)
@@ -89,7 +90,7 @@ class ExportAndDownloadTests(TestCase):
             empresa_cliente=self.empresa,
             fornecedor=self.fornecedor,
             aba="Pedido",
-            linha=2,
+            linha=3,
             codigo_original="000123",
             codigo_normalizado="123",
             produto_original="Tinta branco",
@@ -145,15 +146,15 @@ class ExportAndDownloadTests(TestCase):
         workbook = load_workbook(path)
         try:
             ws = workbook["Pedido"]
-            self.assertEqual(ws["E1"].value, "NFCH - Qtd faturada")
-            self.assertEqual(ws["F1"].value, "NFCH - Numero NF")
-            self.assertEqual(ws["H1"].value, "NFCH - Data faturamento")
-            self.assertEqual(ws["I1"].value, "NFCH - Valor total NF")
-            self.assertEqual(ws["E2"].value, 10)
-            self.assertEqual(ws["F2"].value, "100")
-            self.assertEqual(ws["G2"].value, "1")
-            self.assertEqual(ws["H2"].value.date(), timezone.localtime(association.nota_fiscal.data_emissao).date())
-            self.assertEqual(ws["I2"].value, 999)
+            self.assertEqual(ws["E1"].value, "quantidade faturada")
+            self.assertEqual(ws["F1"].value, "numero da nota")
+            self.assertEqual(ws["G1"].value, "valor da nota")
+            self.assertEqual(ws["H1"].value, "data do faturamento")
+            self.assertIsNone(ws["E2"].value)
+            self.assertEqual(ws["E3"].value, 10)
+            self.assertEqual(ws["F3"].value, "100")
+            self.assertEqual(ws["G3"].value, 999)
+            self.assertEqual(ws["H3"].value.date(), timezone.localtime(association.nota_fiscal.data_emissao).date())
         finally:
             workbook.close()
 
